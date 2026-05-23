@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-gradient {
+  background: linear-gradient(180deg, #1e1b4b 0%, #1e3a8a 100%);
+}
+
+.accent-gradient {
+  background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%);
+}
+
+.active-nav {
+  background: rgba(255, 255, 255, 0.1);
+  border-left: 4px solid #818cf8;
+}
