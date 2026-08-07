@@ -1,4 +1,4 @@
-import { UserTenant, Customer, Product, Invoice, Sale, Expense, DashboardStats, AccessLog, ChatMessage, ActiveSession } from './types';
+import { UserTenant, Customer, Product, Invoice, Sale, Expense, DashboardStats, AccessLog, ChatMessage, ActiveSession, PurchaseRecord, CustomerPayment, CustomerReturn } from './types';
 
 // Multi-tenant Local Database Engine
 const KEYS = {
@@ -12,12 +12,18 @@ const KEYS = {
   ACCESS_LOGS: 'biz_suite_access_logs',
   SUPPORT_CHATS: 'biz_suite_support_chats',
   ACTIVE_SESSIONS: 'biz_suite_active_sessions',
+  PURCHASES: 'biz_suite_purchases',
+  CUSTOMER_PAYMENTS: 'biz_suite_customer_payments',
+  CUSTOMER_RETURNS: 'biz_suite_customer_returns',
 };
 
 // Seed initial Demo Tenant if nothing exists
 export function initializeDatabase() {
-  const tenants = getTenants();
-  if (tenants.length === 0) {
+  let tenants = getTenants();
+  
+  // Ensure tenant-demo ALWAYS exists as the principal sandbox tenant
+  const hasDemo = tenants.some(t => t.id === 'tenant-demo' || t.email.toLowerCase() === 'demo@business.com');
+  if (!hasDemo) {
     const demoTenant: UserTenant = {
       id: 'tenant-demo',
       email: 'demo@business.com',
@@ -33,15 +39,78 @@ export function initializeDatabase() {
       invoiceNotes: 'Thank you for your business. Payment is due within 15 days via wire transfer to Bank Account IBAN US993881023.',
       role: 'admin',
       isActive: true,
+      isApproved: true,
       subscriptionStatus: 'active',
       subscriptionExpiry: '2027-12-31',
       createdAt: '2026-01-01'
     };
-    
-    localStorage.setItem(KEYS.TENANTS, JSON.stringify([demoTenant]));
-    
-    // Seed demo data for this trial tenant
+    tenants.unshift(demoTenant);
+    localStorage.setItem(KEYS.TENANTS, JSON.stringify(tenants));
+  }
+
+  // Ensure Apex Enterprise Solutions has active sample demo records seeded
+  const currentDemoCustomers = getCustomers('tenant-demo');
+  if (currentDemoCustomers.length === 0) {
     seedDemoDataForTenant('tenant-demo');
+  }
+
+  // Ensure high-critical super admin irfanksaeed@gmail.com has a master admin account
+  const irfanEmail = 'irfanksaeed@gmail.com';
+  const hasIrfan = tenants.some(t => t.email.toLowerCase() === irfanEmail);
+  if (!hasIrfan) {
+    const irfanTenant: UserTenant = {
+      id: 'tenant-irfan',
+      email: irfanEmail,
+      passwordSha: 'irfan123', // memorable default password
+      companyName: 'Unified Global Administration',
+      currency: 'AED',
+      language: 'en',
+      taxRate: 5,
+      taxNumber: 'TRN-ADM-97100',
+      phone: '+971 50 123 4567',
+      address: 'Global Admin Center Office, Burj Khalifa Sector, Dubai, UAE',
+      invoicePrefix: 'SYS-',
+      invoiceNotes: 'Master Super Administrator Account.',
+      role: 'admin',
+      isActive: true,
+      isApproved: true,
+      subscriptionStatus: 'active',
+      subscriptionExpiry: '2035-12-31',
+      createdAt: '2026-05-26'
+    };
+    tenants.push(irfanTenant);
+    localStorage.setItem(KEYS.TENANTS, JSON.stringify(tenants));
+  }
+
+  // One-time bulk auto-approvals migration:
+  // Auto-approve existing unapproved accounts so friends don't get stuck in pending verification.
+  let tenantsChanged = false;
+  const updatedTenants = tenants.map(t => {
+    if (t.isApproved === false) {
+      tenantsChanged = true;
+      return { ...t, isApproved: true };
+    }
+    return t;
+  });
+  if (tenantsChanged) {
+    localStorage.setItem(KEYS.TENANTS, JSON.stringify(updatedTenants));
+  }
+
+  const customersList = getCustomersGlobal();
+  let customersChanged = false;
+  const updatedCustomers = customersList.map(c => {
+    if (c.isApproved === false) {
+      customersChanged = true;
+      return { ...c, isApproved: true };
+    }
+    return c;
+  });
+  if (customersChanged) {
+    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(updatedCustomers));
+  }
+
+  if (tenantsChanged || customersChanged) {
+    triggerServerSync();
   }
 }
 
@@ -68,7 +137,7 @@ function getApiUrl(path: string): string {
   return (origin && origin !== 'null') ? `${origin}${path}` : path;
 }
 
-export function triggerServerSync(): void {
+export async function pushServerSync(): Promise<void> {
   try {
     const dbData: Record<string, any> = {};
     const SYNC_KEYS = [
@@ -80,7 +149,8 @@ export function triggerServerSync(): void {
       'biz_suite_expenses',
       'biz_suite_access_logs',
       'biz_suite_support_chats',
-      'biz_suite_active_sessions'
+      'biz_suite_active_sessions',
+      'biz_suite_purchases'
     ];
     SYNC_KEYS.forEach(key => {
       const val = localStorage.getItem(key);
@@ -93,18 +163,35 @@ export function triggerServerSync(): void {
       }
     });
 
-    fetch(getApiUrl('/api/db'), {
+    const reqHeaders: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    try {
+      const activeUser = getActiveUser();
+      if (activeUser && activeUser.role === 'admin') {
+        reqHeaders['x-caller-role'] = 'admin';
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    const res = await fetch(getApiUrl('/api/db'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: reqHeaders,
       body: JSON.stringify(dbData)
-    }).catch(err => {
-      console.warn('Background cloud database synchronization is currently offline: local storage is functioning correctly.', err.message || err);
     });
-  } catch (err) {
-    console.warn('Global trigger sync failed to execute context:', err);
+    if (!res.ok) {
+      console.warn('POST sync returned non-ok status:', res.status);
+    }
+  } catch (err: any) {
+    console.warn('Background cloud database synchronization is currently offline: local storage is functioning correctly.', err.message || err);
   }
+}
+
+export function triggerServerSync(): void {
+  pushServerSync().catch(err => {
+    console.warn('Global trigger sync failed to execute context:', err);
+  });
 }
 
 export async function pullServerSync(): Promise<void> {
@@ -121,13 +208,15 @@ export async function pullServerSync(): Promise<void> {
         'biz_suite_expenses',
         'biz_suite_access_logs',
         'biz_suite_support_chats',
-        'biz_suite_active_sessions'
+        'biz_suite_active_sessions',
+        'biz_suite_purchases'
       ];
       SYNC_KEYS.forEach(key => {
         if (cloudDb && cloudDb[key] !== undefined) {
           localStorage.setItem(key, JSON.stringify(cloudDb[key]));
         }
       });
+      notifyDbUpdate();
     } else {
       console.warn('Cloud database pull responded with non-ok status code:', res.status);
     }
@@ -136,9 +225,16 @@ export async function pullServerSync(): Promise<void> {
   }
 }
 
+export function notifyDbUpdate(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('db-update'));
+  }
+}
+
 function setStorageArray<T>(key: string, data: T[]): void {
   localStorage.setItem(key, JSON.stringify(data));
   triggerServerSync();
+  notifyDbUpdate();
 }
 
 // Access Logs
@@ -169,6 +265,7 @@ export function logAccess(
     // Maintain a maximum of 300 logs for display to avoid storage bloat
     const updated = [newLog, ...logs].slice(0, 300);
     setStorageArray(KEYS.ACCESS_LOGS, updated);
+    triggerServerSync();
   } catch (err) {
     console.error('Failed to append access log', err);
   }
@@ -176,6 +273,27 @@ export function logAccess(
 
 export function clearAccessLogs(): void {
   setStorageArray(KEYS.ACCESS_LOGS, []);
+  triggerServerSync();
+}
+
+export function logTenantAction(tenantId: string, action: string): void {
+  try {
+    const tenants = getTenants();
+    const tenant = tenants.find(t => t.id === tenantId);
+    if (tenant) {
+      logAccess('merchant', tenantId, tenant.companyName, tenant.email, action);
+    } else {
+      const customers = getCustomersGlobal();
+      const customer = customers.find(c => c.id === tenantId);
+      if (customer) {
+        logAccess('customer', tenantId, customer.name, customer.email, action);
+      } else {
+        logAccess('merchant', tenantId, 'System Operator', 'operator@business.com', action);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to log tenant action', err);
+  }
 }
 
 export function adminToggleCustomerBlockGlobal(customerId: string): boolean {
@@ -187,6 +305,19 @@ export function adminToggleCustomerBlockGlobal(customerId: string): boolean {
     localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(allCustomers));
     triggerServerSync();
     return cust.isBlocked || false;
+  }
+  return false;
+}
+
+export function adminToggleCustomerApprovalGlobal(customerId: string): boolean {
+  const allCustomers = getCustomersGlobal();
+  const index = allCustomers.findIndex(c => c.id === customerId);
+  if (index !== -1) {
+    const cust = allCustomers[index];
+    cust.isApproved = cust.isApproved !== false ? false : true;
+    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(allCustomers));
+    triggerServerSync();
+    return cust.isApproved || false;
   }
   return false;
 }
@@ -210,6 +341,7 @@ export function registerTenant(tenant: UserTenant): boolean {
     ...tenant,
     role: isSpecialAdmin ? 'admin' : 'user',
     isActive: true,
+    isApproved: true, // Auto-approve all registrations for smooth demo setups
     subscriptionStatus: 'active',
     subscriptionExpiry: '2027-05-22', // Default 1 year subscription
     createdAt: new Date().toISOString().split('T')[0]
@@ -271,7 +403,25 @@ export function adminCreateTenant(tenant: UserTenant): boolean {
 
 export function getActiveUser(): UserTenant | null {
   const data = localStorage.getItem(KEYS.ACTIVE_USER);
-  return data ? JSON.parse(data) : null;
+  if (!data) return null;
+  try {
+    const rawUser = JSON.parse(data) as UserTenant;
+    // Cross-verify with registered tenants status
+    const verifiedTenant = getTenants().find(t => t.id === rawUser.id);
+    if (!verifiedTenant) {
+      localStorage.removeItem(KEYS.ACTIVE_USER);
+      return null;
+    }
+    // Blocked or de-activated tenants should be logged out immediately
+    if (verifiedTenant.isActive === false || verifiedTenant.isApproved === false) {
+      localStorage.removeItem(KEYS.ACTIVE_USER);
+      return null;
+    }
+    return verifiedTenant;
+  } catch (e) {
+    localStorage.removeItem(KEYS.ACTIVE_USER);
+    return null;
+  }
 }
 
 export function setActiveUser(user: UserTenant | null): void {
@@ -295,6 +445,7 @@ export function updateTenantSettings(updated: Partial<UserTenant>): UserTenant |
     tenants[idx] = merged;
     setStorageArray(KEYS.TENANTS, tenants);
   }
+  logTenantAction(merged.id, 'Updated tenant account profile details and workspace settings');
   return merged;
 }
 
@@ -393,15 +544,18 @@ export function addCustomer(tenantId: string, data: Omit<Customer, 'id' | 'tenan
     isApproved: data.isApproved !== undefined ? data.isApproved : true // Merchant registered are active, online-registered pending until approved
   };
   saveTenantData(KEYS.CUSTOMERS, tenantId, newItem, true);
+  logTenantAction(tenantId, `Created customer record for "${newItem.name}" (${newItem.email || 'No Email'})`);
   return newItem;
 }
 
 export function editCustomer(tenantId: string, item: Customer): void {
   saveTenantData(KEYS.CUSTOMERS, tenantId, item, false);
+  logTenantAction(tenantId, `Updated customer card for "${item.name}"`);
 }
 
 export function deleteCustomer(tenantId: string, id: string): void {
   deleteTenantData(KEYS.CUSTOMERS, tenantId, id);
+  logTenantAction(tenantId, `Removed customer account ID [${id}]`);
 }
 
 export function toggleCustomerBlock(tenantId: string, customerId: string): boolean {
@@ -462,15 +616,18 @@ export function addProduct(tenantId: string, data: Omit<Product, 'id' | 'tenantI
     createdAt: new Date().toISOString()
   };
   saveTenantData(KEYS.PRODUCTS, tenantId, newItem, true);
+  logTenantAction(tenantId, `Added product "${newItem.name}" to inventory list (Price: ${newItem.price})`);
   return newItem;
 }
 
 export function editProduct(tenantId: string, item: Product): void {
   saveTenantData(KEYS.PRODUCTS, tenantId, item, false);
+  logTenantAction(tenantId, `Modified inventory details for product "${item.name}" (Stock: ${item.stock})`);
 }
 
 export function deleteProduct(tenantId: string, id: string): void {
   deleteTenantData(KEYS.PRODUCTS, tenantId, id);
+  logTenantAction(tenantId, `Deleted product entry ID [${id}] from master inventory`);
 }
 
 // Sales transactions
@@ -486,15 +643,44 @@ export function addSale(tenantId: string, data: Omit<Sale, 'id' | 'tenantId' | '
     createdAt: new Date().toISOString()
   };
   saveTenantData(KEYS.SALES, tenantId, newItem, true);
+  logTenantAction(tenantId, `Registered sale transaction: ${newItem.description} (Amount: ${newItem.amount})`);
+
+  // If this sale carries an invoiceId, automatically resolve and mark the corresponding Invoice as paid!
+  if (newItem.invoiceId) {
+    const invoices = getInvoices(tenantId);
+    const linkedInvoice = invoices.find(inv => inv.id === newItem.invoiceId);
+    if (linkedInvoice && linkedInvoice.status !== 'paid') {
+      linkedInvoice.status = 'paid';
+      linkedInvoice.paymentMethod = newItem.paymentMethod;
+      linkedInvoice.amountPaid = linkedInvoice.total;
+      linkedInvoice.balanceDue = 0;
+      saveTenantData(KEYS.INVOICES, tenantId, linkedInvoice, false);
+    }
+  }
+
   return newItem;
 }
 
 export function editSale(tenantId: string, item: Sale): void {
   saveTenantData(KEYS.SALES, tenantId, item, false);
+  logTenantAction(tenantId, `Edited sale transaction details for ID [${item.id}]`);
 }
 
 export function deleteSale(tenantId: string, id: string): void {
+  const sales = getSales(tenantId);
+  const foundSale = sales.find(s => s.id === id);
+  if (foundSale && foundSale.invoiceId) {
+    const invoices = getInvoices(tenantId);
+    const linkedInvoice = invoices.find(inv => inv.id === foundSale.invoiceId);
+    if (linkedInvoice && linkedInvoice.status === 'paid') {
+      linkedInvoice.status = 'unpaid';
+      linkedInvoice.amountPaid = 0;
+      linkedInvoice.balanceDue = linkedInvoice.total;
+      saveTenantData(KEYS.INVOICES, tenantId, linkedInvoice, false);
+    }
+  }
   deleteTenantData(KEYS.SALES, tenantId, id);
+  logTenantAction(tenantId, `Deleted sale transaction record ID [${id}]`);
 }
 
 // Expenses
@@ -510,15 +696,18 @@ export function addExpense(tenantId: string, data: Omit<Expense, 'id' | 'tenantI
     createdAt: new Date().toISOString()
   };
   saveTenantData(KEYS.EXPENSES, tenantId, newItem, true);
+  logTenantAction(tenantId, `Recorded business expense: "${newItem.description}" (Amount: ${newItem.amount})`);
   return newItem;
 }
 
 export function editExpense(tenantId: string, item: Expense): void {
   saveTenantData(KEYS.EXPENSES, tenantId, item, false);
+  logTenantAction(tenantId, `Edited expense entry ID [${item.id}]`);
 }
 
 export function deleteExpense(tenantId: string, id: string): void {
   deleteTenantData(KEYS.EXPENSES, tenantId, id);
+  logTenantAction(tenantId, `Deleted business expense record ID [${id}]`);
 }
 
 // Invoices (Multi-Item complete sales)
@@ -526,19 +715,33 @@ export function getInvoices(tenantId: string): Invoice[] {
   return getTenantData<Invoice>(KEYS.INVOICES, tenantId);
 }
 
-export function addInvoice(tenantId: string, data: Omit<Invoice, 'id' | 'tenantId' | 'createdAt' | 'invoiceNumber'> & { invoiceNumber?: string }): Invoice {
+export function addInvoice(
+  tenantId: string, 
+  data: Omit<Invoice, 'id' | 'tenantId' | 'createdAt' | 'invoiceNumber'> & { invoiceNumber?: string },
+  existingSaleId?: string
+): Invoice {
   const nextId = getNextInvoiceId(tenantId);
   const newItem: Invoice = {
     ...data,
     id: nextId,
-    invoiceNumber: nextId, // Automatically use auto-incremented invoice number format
+    invoiceNumber: data.invoiceNumber || nextId, // Support custom invoice number if provided
     tenantId,
     createdAt: new Date().toISOString()
   };
   saveTenantData(KEYS.INVOICES, tenantId, newItem, true);
+  logTenantAction(tenantId, `Created Invoice #${newItem.invoiceNumber} for total ${newItem.total} (${newItem.status.toUpperCase()})`);
   
-  // If invoice is created as PAID, we automatically record a corresponding Sale transaction
-  if (newItem.status === 'paid') {
+  // If an existing sale ID is being converted to this invoice, link it
+  if (existingSaleId) {
+    const sales = getSales(tenantId);
+    const found = sales.find(s => s.id === existingSaleId);
+    if (found) {
+      found.invoiceId = nextId;
+      found.description = `Settlement for Invoice #${newItem.invoiceNumber}`;
+      editSale(tenantId, found);
+    }
+  } else if (newItem.status === 'paid') {
+    // Only record standard paid sale logs if no pre-existing sale is being converted
     recordSaleFromInvoice(tenantId, newItem);
   }
   
@@ -553,17 +756,50 @@ export function editInvoice(tenantId: string, updatedInvoice: Invoice): void {
   
   // Save new invoice details
   saveTenantData(KEYS.INVOICES, tenantId, updatedInvoice, false);
+  logTenantAction(tenantId, `Updated Invoice #${updatedInvoice.invoiceNumber} details`);
 
   // If transition to paid happened, record a corresponding sale
   if (updatedInvoice.status === 'paid' && (!oldInvoice || oldInvoice.status !== 'paid')) {
     recordSaleFromInvoice(tenantId, updatedInvoice);
+  }
+  // If transitioned from paid back to unpaid, delete the matching sale
+  else if (updatedInvoice.status !== 'paid' && oldInvoice && oldInvoice.status === 'paid') {
+    const sales = getSales(tenantId);
+    const matchingSale = sales.find(s => s.invoiceId === updatedInvoice.id);
+    if (matchingSale) {
+      deleteSale(tenantId, matchingSale.id);
+    }
+  }
+  // If it was already paid and remains paid, but details (total, payment method, name) changed, update the sale details
+  else if (updatedInvoice.status === 'paid' && oldInvoice && oldInvoice.status === 'paid') {
+    const sales = getSales(tenantId);
+    const matchingSale = sales.find(s => s.invoiceId === updatedInvoice.id);
+    if (matchingSale) {
+      matchingSale.amount = updatedInvoice.total;
+      matchingSale.customerName = updatedInvoice.customerName;
+      matchingSale.paymentMethod = updatedInvoice.paymentMethod || 'bank';
+      matchingSale.description = `Settlement for Invoice #${updatedInvoice.invoiceNumber}`;
+      editSale(tenantId, matchingSale);
+    }
   }
   
   // Re-adjust stock if quantities/items changed is outside basic scope, we can update simple stocks safely
 }
 
 export function deleteInvoice(tenantId: string, id: string): void {
+  // First, find and delete any linked sale so that revenue calculation stays accurate
+  const sales = getSales(tenantId);
+  const linkedSale = sales.find(s => s.invoiceId === id);
+  if (linkedSale) {
+    deleteSale(tenantId, linkedSale.id);
+  }
+  // Get invoice number for descriptive logging
+  const invoices = getInvoices(tenantId);
+  const found = invoices.find(inv => inv.id === id);
+  const invoiceNum = found ? found.invoiceNumber : id;
+  
   deleteTenantData(KEYS.INVOICES, tenantId, id);
+  logTenantAction(tenantId, `Deleted Invoice record ID [#${invoiceNum}]`);
 }
 
 function recordSaleFromInvoice(tenantId: string, inv: Invoice) {
@@ -812,6 +1048,7 @@ export function markChatAsRead(senderEmail: string, receiverEmail: string): void
 
 // Active User Sessions Helpers
 export function getActiveSessions(): ActiveSession[] {
+  clearStaleSessions();
   return getStorageArray<ActiveSession>(KEYS.ACTIVE_SESSIONS);
 }
 
@@ -874,7 +1111,7 @@ export function updateActiveSession(
 }
 
 export function clearStaleSessions(): void {
-  let sessions = getActiveSessions();
+  let sessions = getStorageArray<ActiveSession>(KEYS.ACTIVE_SESSIONS);
   const now = new Date();
   const filtered = sessions.filter(session => {
     try {
@@ -888,3 +1125,287 @@ export function clearStaleSessions(): void {
     setStorageArray(KEYS.ACTIVE_SESSIONS, filtered);
   }
 }
+
+// Purchase Records database operations
+export function getPurchases(tenantId: string): PurchaseRecord[] {
+  const list = getStorageArray<PurchaseRecord>(KEYS.PURCHASES);
+  return list.filter(item => item.tenantId === tenantId);
+}
+
+export function addPurchase(tenantId: string, data: Omit<PurchaseRecord, 'id' | 'tenantId' | 'createdAt'>): PurchaseRecord {
+  const list = getStorageArray<PurchaseRecord>(KEYS.PURCHASES);
+  const newId = 'pur-' + Date.now() + Math.random().toString(36).substring(2, 7);
+  const nowStr = new Date().toISOString();
+  
+  const newItem: PurchaseRecord = {
+    ...data,
+    id: newId,
+    tenantId,
+    createdAt: nowStr
+  };
+  
+  list.push(newItem);
+  setStorageArray(KEYS.PURCHASES, list);
+  
+  // High craftsmanship: automatically adjust product inventory stock when merchandise is purchased from supplier
+  if (data.sku) {
+    const products = getProducts(tenantId);
+    const matchedIdx = products.findIndex(p => p.sku === data.sku);
+    if (matchedIdx !== -1) {
+      products[matchedIdx].stock += Math.max(0, data.quantity);
+      editProduct(tenantId, products[matchedIdx]);
+    }
+  }
+
+  triggerServerSync();
+  return newItem;
+}
+
+export function deletePurchase(tenantId: string, id: string): void {
+  const list = getStorageArray<PurchaseRecord>(KEYS.PURCHASES);
+  const index = list.findIndex(item => item.tenantId === tenantId && item.id === id);
+  if (index !== -1) {
+    const purchase = list[index];
+    list.splice(index, 1);
+    setStorageArray(KEYS.PURCHASES, list);
+
+    // Rollback stock if deleted? Yes! If we cancel/delete a supplier purchase, reduce the product SKU stock accordingly.
+    if (purchase.sku) {
+      const products = getProducts(tenantId);
+      const matchedIdx = products.findIndex(p => p.sku === purchase.sku);
+      if (matchedIdx !== -1) {
+        products[matchedIdx].stock = Math.max(0, products[matchedIdx].stock - purchase.quantity);
+        editProduct(tenantId, products[matchedIdx]);
+      }
+    }
+
+    triggerServerSync();
+  }
+}
+
+export function editPurchase(tenantId: string, item: PurchaseRecord): void {
+  const list = getStorageArray<PurchaseRecord>(KEYS.PURCHASES);
+  const idx = list.findIndex(r => r.tenantId === tenantId && r.id === item.id);
+  if (idx !== -1) {
+    const prev = list[idx];
+    list[idx] = item;
+    setStorageArray(KEYS.PURCHASES, list);
+
+    // Recalculate stock adjustments
+    if (item.sku) {
+      const products = getProducts(tenantId);
+      const matchedIdx = products.findIndex(p => p.sku === item.sku);
+      if (matchedIdx !== -1) {
+        // Remove previous difference, add new difference
+        const difference = item.quantity - prev.quantity;
+        products[matchedIdx].stock = Math.max(0, products[matchedIdx].stock + difference);
+        editProduct(tenantId, products[matchedIdx]);
+      }
+    }
+
+    triggerServerSync();
+  }
+}
+
+export function resetTenantData(tenantId: string): void {
+  // Wipe sales
+  let sales = getStorageArray<Sale>(KEYS.SALES);
+  sales = sales.filter(s => s.tenantId !== tenantId);
+  setStorageArray(KEYS.SALES, sales);
+
+  // Wipe expenses
+  let expenses = getStorageArray<Expense>(KEYS.EXPENSES);
+  expenses = expenses.filter(e => e.tenantId !== tenantId);
+  setStorageArray(KEYS.EXPENSES, expenses);
+
+  // Wipe purchases
+  let purchases = getStorageArray<PurchaseRecord>(KEYS.PURCHASES);
+  purchases = purchases.filter(p => p.tenantId !== tenantId);
+  setStorageArray(KEYS.PURCHASES, purchases);
+
+  // Wipe invoices
+  let invoices = getStorageArray<Invoice>(KEYS.INVOICES);
+  invoices = invoices.filter(i => i.tenantId !== tenantId);
+  setStorageArray(KEYS.INVOICES, invoices);
+
+  // Wipe customers
+  let customers = getStorageArray<Customer>(KEYS.CUSTOMERS);
+  customers = customers.filter(c => c.tenantId !== tenantId);
+  setStorageArray(KEYS.CUSTOMERS, customers);
+
+  // Wipe products
+  let products = getStorageArray<Product>(KEYS.PRODUCTS);
+  products = products.filter(p => p.tenantId !== tenantId);
+  setStorageArray(KEYS.PRODUCTS, products);
+
+  // Optional: Seed a clean, default product for illustration or leave empty. We leave empty so they get a pure reset!
+  
+  triggerServerSync();
+}
+
+/**
+ * Ultra-robust lookup of a business tenant by short code, ID, email, or company name
+ */
+export function resolveTenantByCode(inputCode: string, tenants: UserTenant[]): UserTenant | null {
+  if (!inputCode) return null;
+  
+  // Resiliently sanitise the code input:
+  // - trim spaces, linebreaks, tabs
+  // - remove any leading '#' or '?' or '/'
+  // - strip standard prefix words like 'OMNI-' or 'TENANT-' case-insensitively
+  // - strip standard prefix words like 'OMNI', 'TENANT' optionally followed by non-alphanumeric characters
+  const cleanInput = inputCode
+    .trim()
+    .replace(/^[\s#?\/]+/, '') // strip prepended hashes, search metrics, or url paths
+    .replace(/\s+/g, '')
+    .replace(/^(OMNI-|TENANT-)/i, '')
+    .replace(/^(OMNI|TENANT)/i, '')
+    .toLowerCase();
+
+  // 1. Direct short-code match (e.g. t7tyfjf matches "tenant-t7tyfjf")
+  for (const t of tenants) {
+    const cleanId = t.id.replace(/^tenant-/i, '').toLowerCase();
+    if (cleanId === cleanInput) {
+      return t;
+    }
+  }
+
+  // 2. Exact match against database id (case-insensitive)
+  for (const t of tenants) {
+    if (t.id.toLowerCase() === inputCode.trim().toLowerCase()) {
+      return t;
+    }
+    if (t.id.toLowerCase().replace(/\s+/g, '') === inputCode.trim().toLowerCase().replace(/\s+/g, '')) {
+      return t;
+    }
+  }
+
+  // 3. Match against email address (case-insensitive)
+  for (const t of tenants) {
+    if (t.email.toLowerCase() === inputCode.trim().toLowerCase()) {
+      return t;
+    }
+  }
+
+  // 4. Fuzzy match against company name (alphanumeric only)
+  const cleanInputText = inputCode.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (cleanInputText.length >= 3) {
+    for (const t of tenants) {
+      const cleanCompany = t.companyName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (cleanCompany === cleanInputText) {
+        return t;
+      }
+    }
+  }
+
+  return null;
+}
+
+// ==========================================
+// CUSTOMER PAYMENTS DATABASE OPERATIONS
+// ==========================================
+export function getCustomerPayments(tenantId: string, customerId?: string): CustomerPayment[] {
+  const list = getStorageArray<CustomerPayment>(KEYS.CUSTOMER_PAYMENTS || 'biz_suite_customer_payments');
+  const tenantList = list.filter(item => item.tenantId === tenantId);
+  if (customerId) {
+    return tenantList.filter(item => item.customerId === customerId);
+  }
+  return tenantList;
+}
+
+export function addCustomerPayment(tenantId: string, data: Omit<CustomerPayment, 'id' | 'tenantId' | 'createdAt'>): CustomerPayment {
+  const list = getStorageArray<CustomerPayment>(KEYS.CUSTOMER_PAYMENTS || 'biz_suite_customer_payments');
+  const newId = 'pay-' + Date.now() + Math.random().toString(36).substring(2, 7);
+  const nowStr = new Date().toISOString();
+  
+  const newItem: CustomerPayment = {
+    ...data,
+    id: newId,
+    tenantId,
+    createdAt: nowStr
+  };
+  
+  list.push(newItem);
+  setStorageArray(KEYS.CUSTOMER_PAYMENTS || 'biz_suite_customer_payments', list);
+  triggerServerSync();
+  return newItem;
+}
+
+export function deleteCustomerPayment(tenantId: string, id: string): void {
+  const list = getStorageArray<CustomerPayment>(KEYS.CUSTOMER_PAYMENTS || 'biz_suite_customer_payments');
+  const idx = list.findIndex(item => item.tenantId === tenantId && item.id === id);
+  if (idx !== -1) {
+    list.splice(idx, 1);
+    setStorageArray(KEYS.CUSTOMER_PAYMENTS || 'biz_suite_customer_payments', list);
+    triggerServerSync();
+  }
+}
+
+// ==========================================
+// CUSTOMER RETURNS DATABASE OPERATIONS
+// ==========================================
+export function getCustomerReturns(tenantId: string, customerId?: string): CustomerReturn[] {
+  const list = getStorageArray<CustomerReturn>(KEYS.CUSTOMER_RETURNS || 'biz_suite_customer_returns');
+  const tenantList = list.filter(item => item.tenantId === tenantId);
+  if (customerId) {
+    return tenantList.filter(item => item.customerId === customerId);
+  }
+  return tenantList;
+}
+
+export function addCustomerReturn(tenantId: string, data: Omit<CustomerReturn, 'id' | 'tenantId' | 'createdAt'>): CustomerReturn {
+  const list = getStorageArray<CustomerReturn>(KEYS.CUSTOMER_RETURNS || 'biz_suite_customer_returns');
+  const newId = 'ret-' + Date.now() + Math.random().toString(36).substring(2, 7);
+  const nowStr = new Date().toISOString();
+  
+  const newItem: CustomerReturn = {
+    ...data,
+    id: newId,
+    tenantId,
+    createdAt: nowStr
+  };
+  
+  list.push(newItem);
+  setStorageArray(KEYS.CUSTOMER_RETURNS || 'biz_suite_customer_returns', list);
+  
+  // Dynamic feature: automatically adjust stock upward when items are returned
+  data.items.forEach(returnItem => {
+    if (returnItem.productId) {
+      const products = getProducts(tenantId);
+      const matchedIdx = products.findIndex(p => p.id === returnItem.productId);
+      if (matchedIdx !== -1) {
+        products[matchedIdx].stock += Math.max(0, returnItem.quantity);
+        editProduct(tenantId, products[matchedIdx]);
+      }
+    }
+  });
+
+  triggerServerSync();
+  return newItem;
+}
+
+export function deleteCustomerReturn(tenantId: string, id: string): void {
+  const list = getStorageArray<CustomerReturn>(KEYS.CUSTOMER_RETURNS || 'biz_suite_customer_returns');
+  const idx = list.findIndex(item => item.tenantId === tenantId && item.id === id);
+  if (idx !== -1) {
+    const returnRecord = list[idx];
+    list.splice(idx, 1);
+    setStorageArray(KEYS.CUSTOMER_RETURNS || 'biz_suite_customer_returns', list);
+
+    // Rollback stock adjustment: deduct returned items from stock inventory
+    returnRecord.items.forEach(returnItem => {
+      if (returnItem.productId) {
+        const products = getProducts(tenantId);
+        const matchedIdx = products.findIndex(p => p.id === returnItem.productId);
+        if (matchedIdx !== -1) {
+          products[matchedIdx].stock = Math.max(0, products[matchedIdx].stock - returnItem.quantity);
+          editProduct(tenantId, products[matchedIdx]);
+        }
+      }
+    });
+
+    triggerServerSync();
+  }
+}
+
+

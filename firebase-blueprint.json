@@ -1,0 +1,231 @@
+{
+  "entities": {
+    "UserTenant": {
+      "title": "UserTenant",
+      "description": "Multi-tenant business tenant registration details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "passwordSha": { "type": "string" },
+        "companyName": { "type": "string" },
+        "currency": { "type": "string", "enum": ["AED", "USD", "PKR", "INR", "SAR", "EUR"] },
+        "language": { "type": "string", "enum": ["en", "ar", "ur", "hi"] },
+        "taxRate": { "type": "number" },
+        "taxNumber": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "invoicePrefix": { "type": "string" },
+        "invoiceNotes": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "isActive": { "type": "boolean" },
+        "subscriptionStatus": { "type": "string", "enum": ["active", "inactive", "expired"] },
+        "subscriptionExpiry": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "subscriptionPlan": { "type": "string", "enum": ["Free", "Basic", "Pro"] },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Unpaid", "Pending"] },
+        "bannedModules": { "type": "array" },
+        "allowedHoursStart": { "type": "string" },
+        "allowedHoursEnd": { "type": "string" },
+        "tempSuspendedUntil": { "type": "string" }
+      },
+      "required": ["id", "email", "passwordSha", "companyName", "currency", "language"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Merchant customer profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "isBlocked": { "type": "boolean" },
+        "isApproved": { "type": "boolean" }
+      },
+      "required": ["id", "tenantId", "name", "email", "phone", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Inventory product item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "name": { "type": "string" },
+        "sku": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "cost": { "type": "number" },
+        "stock": { "type": "number" },
+        "minStockAlert": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "name", "sku", "price", "stock", "createdAt"]
+    },
+    "InvoiceItem": {
+      "title": "InvoiceItem",
+      "description": "Item specified on an invoice line",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "quantity": { "type": "number" },
+        "price": { "type": "number" },
+        "total": { "type": "number" }
+      },
+      "required": ["productId", "productName", "quantity", "price", "total"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Client invoice receipt document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "date": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "taxRate": { "type": "number" },
+        "taxAmount": { "type": "number" },
+        "discount": { "type": "number" },
+        "total": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["paid", "unpaid", "overdue"] },
+        "paymentMethod": { "type": "string", "enum": ["cash", "card", "bank", "other"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "invoiceNumber", "customerId", "customerName", "date", "dueDate", "items", "subtotal", "taxRate", "total", "status", "createdAt"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Recorded business sale transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "date": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "card", "bank", "other"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "customerName", "date", "amount", "category", "paymentMethod", "createdAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Recorded business expense transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "date": { "type": "string" },
+        "description": { "type": "string" },
+        "recipient": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "amount", "category", "date", "recipient", "createdAt"]
+    },
+    "AccessLog": {
+      "title": "AccessLog",
+      "description": "Database or screen access log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "type": { "type": "string", "enum": ["merchant", "customer"] },
+        "targetId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "action": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "ipAddress": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "type", "targetId", "name", "email", "action"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "In-app support chat message",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderEmail": { "type": "string" },
+        "senderName": { "type": "string" },
+        "receiverEmail": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["id", "senderEmail", "senderName", "receiverEmail", "text", "timestamp", "isRead"]
+    },
+    "ActiveSession": {
+      "title": "ActiveSession",
+      "description": "Trace profile for an active logged in tenant session",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "companyName": { "type": "string" },
+        "activeModule": { "type": "string" },
+        "lastActiveTime": { "type": "string" },
+        "ipAddress": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "deviceInfo": { "type": "string" }
+      },
+      "required": ["userId", "email", "companyName", "activeModule", "lastActiveTime", "ipAddress", "userAgent", "deviceInfo"]
+    }
+  },
+  "firestore": {
+    "/tenants/{tenantId}": {
+      "schema": "UserTenant",
+      "description": "Stores tenant profile settings and security roles"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Stores customers across all tenants"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Stores stock items across all tenants"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Stores printable client invoices across all tenants"
+    },
+    "/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Stores sales ledger entries across all tenants"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Stores expense ledger entries across all tenants"
+    },
+    "/accessLogs/{logId}": {
+      "schema": "AccessLog",
+      "description": "Stores global access logs for administration auditing"
+    },
+    "/supportChats/{chatId}": {
+      "schema": "ChatMessage",
+      "description": "Stores client support interaction exchanges"
+    },
+    "/activeSessions/{sessionId}": {
+      "schema": "ActiveSession",
+      "description": "Stores brief heartbeats of active merchant connections"
+    }
+  }
+}

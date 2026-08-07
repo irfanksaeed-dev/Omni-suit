@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserTenant, Product } from '../types';
 import { translations, currencySymbols } from '../translations';
 import { getProducts, editProduct } from '../db';
@@ -28,6 +28,13 @@ export default function InventoryModule({ user, onRefreshStats, onNavigate }: In
     setProducts(list);
     onRefreshStats();
   };
+
+  useEffect(() => {
+    window.addEventListener('db-update', handleRefresh);
+    return () => {
+      window.removeEventListener('db-update', handleRefresh);
+    };
+  }, []);
 
   const handleQuickAdjust = (e: React.FormEvent) => {
     e.preventDefault();

@@ -7,8 +7,10 @@ import {
   getAccessLogs,
   clearAccessLogs,
   adminToggleCustomerBlockGlobal,
+  adminToggleCustomerApprovalGlobal,
   getCustomersGlobal,
   pullServerSync,
+  pushServerSync,
   getActiveSessions,
   getSupportChats,
   addChatMessage,
@@ -46,7 +48,10 @@ import {
   MessageSquare,
   MessageCircle,
   Send,
-  BarChart3
+  BarChart3,
+  Share2,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface AdminModuleProps {
@@ -75,7 +80,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
   const [editPhone, setEditPhone] = useState('');
   const [editAddress, setEditAddress] = useState('');
   const [editTaxNumber, setEditTaxNumber] = useState('');
-  const [editTaxRate, setEditTaxRate] = useState(15);
+  const [editTaxRate, setEditTaxRate] = useState<number | string>(15);
   const [editCurrency, setEditCurrency] = useState<'AED' | 'USD' | 'PKR' | 'INR' | 'SAR' | 'EUR'>('SAR');
   const [editLanguage, setEditLanguage] = useState<'en' | 'ar' | 'ur' | 'hi'>('en');
   const [editInvoicePrefix, setEditInvoicePrefix] = useState('INV-');
@@ -99,7 +104,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
   const [createCompanyName, setCreateCompanyName] = useState('');
   const [createCurrency, setCreateCurrency] = useState<'AED' | 'USD' | 'PKR' | 'INR' | 'SAR' | 'EUR'>('SAR');
   const [createLanguage, setCreateLanguage] = useState<'en' | 'ar' | 'ur' | 'hi'>('en');
-  const [createTaxRate, setCreateTaxRate] = useState(15);
+  const [createTaxRate, setCreateTaxRate] = useState<number | string>(15);
   const [createTaxNumber, setCreateTaxNumber] = useState('');
   const [createPhone, setCreatePhone] = useState('');
   const [createAddress, setCreateAddress] = useState('');
@@ -110,11 +115,49 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
   const [accessLogs, setAccessLogs] = useState<AccessLog[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRefreshingSessions, setIsRefreshingSessions] = useState(false);
+  const [isSyncingRegister, setIsSyncingRegister] = useState(false);
+  const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
   
   // Real-time admin states for active terminals and multi-threaded chat loops
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   const [selectedChatUserEmail, setSelectedChatUserEmail] = useState<string | null>(null);
   const [adminChatText, setAdminChatText] = useState('');
+  const [copiedSignup, setCopiedSignup] = useState(false);
+
+  const handleCopySignupLink = () => {
+    const signupUrl = `${window.location.origin}/?mode=register`;
+    
+    // Robust copy to clipboard
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(signupUrl);
+        setCopiedSignup(true);
+        setTimeout(() => setCopiedSignup(false), 2000);
+        return;
+      }
+    } catch (err) {
+      console.warn("Navigator clipboard blocked, using fallback", err);
+    }
+
+    try {
+      const textArea = document.createElement("textarea");
+      textArea.value = signupUrl;
+      textArea.style.top = "0";
+      textArea.style.left = "0";
+      textArea.style.position = "fixed";
+      textArea.style.opacity = "0";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopiedSignup(true);
+      setTimeout(() => setCopiedSignup(false), 2000);
+    } catch (err) {
+      console.error("Fallback copy failed:", err);
+    }
+  };
 
   const [acknowledgedIds, setAcknowledgedIds] = useState<string[]>(() => {
     try {
@@ -136,10 +179,13 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
     loadAccessLogsData();
     loadCustomersData();
 
-    // Fetch live session instances immediately and bind a periodic pinger
+    // Fetch live session instances immediately and bind a periodic pinger to fetch local storage updates (auto-synced with cloud server in App.tsx)
     setActiveSessions(getActiveSessions());
     const sessPinger = setInterval(() => {
       setActiveSessions(getActiveSessions());
+      setAccessLogs(getAccessLogs());
+      setCustomers(getCustomersGlobal());
+      setTenants(getTenants());
     }, 4000);
     return () => clearInterval(sessPinger);
   }, []);
@@ -148,15 +194,27 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
     setCustomers(getCustomersGlobal());
   };
 
-  const loadAccessLogsData = () => {
+  const loadAccessLogsData = async () => {
+    setIsRefreshingLogs(true);
+    try {
+      await pullServerSync();
+    } catch (e) {
+      console.warn("Background cloud database synchronization is currently offline.", e);
+    } finally {
+      setIsRefreshingLogs(false);
+    }
     setAccessLogs(getAccessLogs());
   };
 
-  const handleRefreshAll = () => {
+  const handleRefreshAll = async () => {
     setIsRefreshing(true);
     const beforeRecords = getCustomersGlobal();
     
-    // Pull fresh data from localStorage/simulated server
+    // Push and Pull real cloud/server-side state instantly
+    await pushServerSync();
+    await pullServerSync();
+    
+    // Pull fresh data from synced localStorage
     loadTenants();
     loadAccessLogsData();
     loadCustomersData();
@@ -169,9 +227,9 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
       // Compute if there's any truly new registrations
       const newDiscovered = afterRecords.filter(af => !beforeRecords.some(bf => bf.id === af.id));
       if (newDiscovered.length > 0) {
-        setSuccessMsg(`🚀 Access gate refreshed! Found ${newDiscovered.length} new customer registration(s) (نیا صارف موصول ہوا ہے)!`);
+        setSuccessMsg(`🚀 Access gate refreshed! Found ${newDiscovered.length} new customer registration(s)!`);
       } else {
-        setSuccessMsg('⚡ System database synced & refreshed successfully / انتظامیہ ریکارڈز کو کامیابی کے ساتھ اپ ڈیٹ کر دیا گیا ہے۔');
+        setSuccessMsg('⚡ System database synced & refreshed successfully!');
       }
       setTimeout(() => setSuccessMsg(''), 4500);
     }, 750);
@@ -187,14 +245,14 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
     const allIds = customers.map(c => c.id);
     setAcknowledgedIds(allIds);
     localStorage.setItem('biz_suite_acknowledged_customer_ids', JSON.stringify(allIds));
-    setSuccessMsg('Cleared all active gate access registration alerts / تمام نئے گاہک الرٹس کو خارج کر دیا گیا ہے۔');
+    setSuccessMsg('Cleared all active gate access registration alerts.');
     setTimeout(() => setSuccessMsg(''), 3000);
   };
 
   const handleClearAccessLogs = () => {
     clearAccessLogs();
     loadAccessLogsData();
-    setSuccessMsg('Access logs history has been successfully cleared / رسائی کے لاگ صاف کر دیے گئے');
+    setSuccessMsg('Access logs history has been successfully cleared.');
     setTimeout(() => setSuccessMsg(''), 3000);
   };
 
@@ -204,6 +262,14 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
     loadAccessLogsData();
     onRefreshStats();
     setSuccessMsg('Customer gate entry access status configured successfully!');
+    setTimeout(() => setSuccessMsg(''), 3500);
+  };
+
+  const handleToggleCustomerApprovalGlobal = (customerId: string) => {
+    adminToggleCustomerApprovalGlobal(customerId);
+    loadCustomersData();
+    onRefreshStats();
+    setSuccessMsg('Customer approval status updated successfully!');
     setTimeout(() => setSuccessMsg(''), 3500);
   };
 
@@ -365,6 +431,28 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
     setTimeout(() => setSuccessMsg(''), 4500);
   };
 
+  const handleApproveTenantQuick = (t: UserTenant) => {
+    const updated: UserTenant = {
+      ...t,
+      isApproved: true
+    };
+    adminUpdateTenant(updated);
+    loadTenants();
+    setSuccessMsg(`Approved business workspace for "${t.companyName}" successfully.`);
+    onRefreshStats();
+    setTimeout(() => setSuccessMsg(''), 4500);
+  };
+
+  const handleDeleteTenantQuick = (t: UserTenant) => {
+    if (window.confirm(`⚠️ EXTREME ACTION: Are you sure you want to completely PURGE and delete "${t.companyName}" (ID: ${t.id})? All invoices, inventory, and databases under this namespace will be permanently lost!`)) {
+      adminDeleteTenant(t.id);
+      loadTenants();
+      setSuccessMsg(`Fully purged and deleted brand workspace for "${t.companyName}".`);
+      onRefreshStats();
+      setTimeout(() => setSuccessMsg(''), 4550);
+    }
+  };
+
   const executePurgeDelete = (tenantId: string) => {
     if (deleteConfirmTyped !== 'CONFIRM DELETE') {
       alert("Verification mismatch! Please enter 'CONFIRM DELETE' to wipe data.");
@@ -418,7 +506,9 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
       status: t.isActive !== false ? 'active' : 'blocked',
       createdAt: t.createdAt || 'Demo Seeding',
       role: t.role || 'user',
-      storeContext: 'Platform Business'
+      storeContext: 'Platform Business',
+      isApproved: t.isApproved !== false,
+      lastLoginTime: t.lastLoginTime || ''
     })),
     ...customers.map(c => {
       const linked = tenants.find(t => t.id === c.tenantId);
@@ -431,7 +521,9 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
         status: c.isBlocked ? 'blocked' : 'active',
         createdAt: c.createdAt || 'N/A',
         storeContext: linked ? linked.companyName : 'Deleted/Unknown Store',
-        role: 'customer'
+        role: 'customer',
+        isApproved: c.isApproved !== false,
+        lastLoginTime: c.lastLoginTime || ''
       };
     })
   ];
@@ -451,7 +543,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
         <div>
           <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
             <Shield className="w-5 h-5 text-indigo-400 animate-pulse" />
-            System Administration Panel (مزید اختیارات)
+            System Administration Panel
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
             You hold total administrative dominion. Provision, impersonate, reset passwords, configure taxes, and purge database assets.
@@ -466,7 +558,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
             title="Refresh database state and capture any new customer registrations instantly."
           >
             <RefreshCw className={`w-3.5 h-3.5 text-sky-400 ${isRefreshing ? 'animate-spin' : ''}`} />
-            {isRefreshing ? 'Refreshing...' : 'Refresh Register (ڈیٹا ریفریش کریں)'}
+            {isRefreshing ? 'Refreshing...' : 'Refresh Register'}
           </button>
           
           <button
@@ -502,7 +594,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               <div>
                 <h4 className="text-sm font-extrabold text-amber-300 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-450" />
-                  New Customer Registrations Intercepted (نئے صارفین کی آمد)
+                  New Customer Registrations Intercepted
                 </h4>
                 <p className="text-[11px] text-slate-400 mt-0.5">
                   The gate network has detected {unacknowledgedCustomers.length} unregistered / brand-new customer profile activity signals. Review identity credentials below.
@@ -514,7 +606,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               onClick={handleAcknowledgeAll}
               className="px-3 py-1.5 bg-amber-900/30 hover:bg-amber-900 text-amber-200 hover:text-white border border-amber-805 rounded-lg text-[10px] font-bold font-mono uppercase tracking-wide cursor-pointer transition select-none"
             >
-              ✓ Mark All Seen / سب نشان زد کریں
+              ✓ Mark All Seen
             </button>
           </div>
 
@@ -537,7 +629,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                       <div>
                         <div className="font-extrabold text-slate-100 flex items-center gap-1.5 flex-wrap">
                           <span className="text-sm">{customer.name}</span>
-                          <span className="bg-amber-950/70 text-amber-300 text-[8px] font-bold px-1.5 py-0.5 rounded border border-amber-900/35 uppercase tracking-widest font-mono animate-pulse">New / نیا</span>
+                          <span className="bg-amber-950/70 text-amber-300 text-[8px] font-bold px-1.5 py-0.5 rounded border border-amber-900/35 uppercase tracking-widest font-mono animate-pulse">New</span>
                         </div>
                         <p className="text-[10px] text-slate-500 font-mono mt-0.5">Reference Key: {customer.id}</p>
                       </div>
@@ -569,7 +661,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                     <div className="flex items-center gap-1.5">
                       <span className={`w-2 h-2 rounded-full ${isBlocked ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
                       <span className="text-[10px] text-slate-450 font-bold uppercase font-mono">
-                        {isBlocked ? 'ACCESS: BLOCK (بلاک ہے)' : 'ACCESS: ALLOWED (فعال)'}
+                        {isBlocked ? 'ACCESS: BLOCK' : 'ACCESS: ALLOWED'}
                       </span>
                     </div>
 
@@ -671,7 +763,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
           }`}
         >
           <Fingerprint className="w-4 h-4 text-emerald-400 animate-pulse" />
-          Command Center: Central Users (صارفین اور سیشن)
+          Command Center: Central Users
         </button>
         <button
           onClick={() => setActiveTab('businesses')}
@@ -696,7 +788,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
           }`}
         >
           <Users className="w-4 h-4 text-sky-400" />
-          Registered Customers Directory (گاہکوں کی فہرست)
+          Registered Customers Directory
         </button>
         <button
           onClick={() => {
@@ -710,7 +802,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
           }`}
         >
           <Activity className="w-4 h-4 text-emerald-400" />
-          Live Access Control Logs (رسائی لاگ)
+          Live Access Control Logs
         </button>
 
         {/* Live Admin Support Desk */}
@@ -733,7 +825,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
           }`}
         >
           <MessageCircle className="w-4 h-4 text-pink-400" />
-          Live Chat Support Desk (لائیو چیٹ)
+          Live Chat Support Desk
           {getSupportChats().filter(chat => chat.receiverEmail === 'irfanksaeed@gmail.com' && !chat.isRead).length > 0 && (
             <span className="ml-1.5 px-1.5 py-0.5 bg-rose-500 rounded-full font-black text-[9px] text-white animate-bounce">
               {getSupportChats().filter(chat => chat.receiverEmail === 'irfanksaeed@gmail.com' && !chat.isRead).length}
@@ -751,7 +843,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
           }`}
         >
           <BarChart3 className="w-4 h-4 text-amber-500" />
-          Platform Reports (رپورٹس)
+          Platform Reports
         </button>
       </div>
 
@@ -767,7 +859,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-extrabold text-sm text-white truncate max-w-xs">{currentUser.companyName}</span>
-                  <span className="bg-indigo-950/80 text-sky-400 text-[8px] font-extrabold uppercase px-2 py-0.5 rounded border border-indigo-900/40 tracking-widest font-mono">Active Operator Session / میرا لاگ ان</span>
+                  <span className="bg-indigo-950/80 text-sky-400 text-[8px] font-extrabold uppercase px-2 py-0.5 rounded border border-indigo-900/40 tracking-widest font-mono">Active Operator Session</span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-0.5 font-mono">
                   Principal Identity Match: <span className="text-slate-200 select-all">{currentUser.email}</span>
@@ -783,19 +875,269 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               
               <button
                 type="button"
-                onClick={() => {
-                  loadTenants();
-                  loadCustomersData();
-                  loadAccessLogsData();
-                  setSuccessMsg("All credentials with system logs and user data tables synchronized.");
-                  setTimeout(() => setSuccessMsg(''), 2500);
+                disabled={isSyncingRegister}
+                onClick={async () => {
+                  setIsSyncingRegister(true);
+                  setSuccessMsg("Synchronizing register with live database...");
+                  try {
+                    await pushServerSync();
+                    await pullServerSync();
+                    loadTenants();
+                    loadCustomersData();
+                    loadAccessLogsData();
+                    onRefreshStats();
+                    setSuccessMsg("All credentials with system logs and user data tables synchronized.");
+                  } catch (err: any) {
+                    console.error("Sync error:", err);
+                    setSuccessMsg("Failed to fully sync register. Using memory tables backup.");
+                  } finally {
+                    setIsSyncingRegister(false);
+                    setTimeout(() => setSuccessMsg(''), 3000);
+                  }
                 }}
-                className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-slate-200 hover:text-white font-extrabold text-[11px] uppercase tracking-wider rounded-lg border border-slate-800 hover:border-slate-700 flex items-center gap-1.5 transition cursor-pointer select-none"
+                className={`px-3.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-slate-200 hover:text-white font-extrabold text-[11px] uppercase tracking-wider rounded-lg border border-slate-800 hover:border-slate-700 flex items-center gap-1.5 transition cursor-pointer select-none ${isSyncingRegister ? 'opacity-70 pointer-events-none' : ''}`}
               >
-                <RefreshCw className="w-3.5 h-3.5 text-sky-450 active:animate-spin" />
-                Sync System Register
+                <RefreshCw className={`w-3.5 h-3.5 text-sky-450 ${isSyncingRegister ? 'animate-spin' : ''}`} />
+                {isSyncingRegister ? 'Synchronizing...' : 'Sync System Register'}
               </button>
             </div>
+          </div>
+
+          {/* SHARE REGISTER INVITE LINK SECTION (BILINGUAL) */}
+          <div className="bg-gradient-to-r from-indigo-950/75 via-slate-900 to-indigo-950/75 border border-indigo-500/30 p-5 rounded-2xl shadow-xl space-y-4 animate-fadeIn">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div className="space-y-1 w-full md:w-3/4">
+                <div className="flex items-center gap-2 text-indigo-400">
+                  <Share2 className="w-5 h-5 text-indigo-400 animate-pulse" />
+                  <span className="font-extrabold text-xs tracking-wider uppercase bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 font-mono">
+                    Share SignUp Invite / مشاركة رابط التسجيل
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <h4 className="text-white font-bold text-sm">📢 Registration Invite Link (English)</h4>
+                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                      Share this short registration link. It allows new business owners to register their own clean, separate, isolated workspace. Their calculations and database tables will remain strictly separate and will not mix with anyone else.
+                    </p>
+                  </div>
+                  <div className="text-right" dir="rtl">
+                    <h4 className="text-white font-bold text-sm">📢 رابط دعوة التسجيل (العربية)</h4>
+                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed font-sans">
+                      شارك رابط التسجيل القصير هذا لتمكين أصحاب الأعمال الجدد من تسجيل حساب خاص بهم والحصول على مساحة عمل نظيفة ومنفصلة. ستبقى بياناتهم وعمليتهم التجارية معزولة تمامًا ولن تتداخل مع بيانات أي أحد آخر.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="w-full md:w-1/4 flex flex-col justify-center items-end">
+                <button
+                  type="button"
+                  onClick={handleCopySignupLink}
+                  className={`w-full md:w-auto px-5 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer ${
+                    copiedSignup 
+                      ? 'bg-emerald-600 text-white border border-emerald-500' 
+                      : 'accent-gradient text-white shadow-lg hover:opacity-95'
+                  }`}
+                >
+                  {copiedSignup ? (
+                    <>
+                      <Check className="w-4 h-4 animate-bounce" />
+                      Copied! / تم النسخ
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      Copy Invite Link / نسخ الرابط
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Visual indicator of the dynamic link URL */}
+            <div className="bg-black/50 border border-slate-800 p-3 rounded-xl flex items-center justify-between font-mono text-xs text-slate-400 select-all">
+              <span className="truncate mr-4 text-indigo-305 font-bold select-all">
+                {typeof window !== 'undefined' ? `${window.location.origin}/?mode=register` : 'https://bizsuite.system/?mode=register'}
+              </span>
+              <span className="text-[10px] text-slate-500 font-extrabold uppercase shrink-0">Short Invite Link / رابط دعوة قصير</span>
+            </div>
+          </div>
+
+          {/* REAL-TIME ONLINE ACTIVE USER SESSIONS PANEL */}
+          <div className="bg-slate-900 border border-slate-850 rounded-2xl p-5 space-y-4 shadow-2xl animate-fadeIn">
+            <div className="flex justify-between items-center flex-wrap gap-2 pb-3 border-b border-indigo-950/35">
+              <div>
+                <h3 className="text-white text-xs font-black uppercase tracking-wider flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0 border border-emerald-400" />
+                  Live Logged-In Users & Terminals ({activeSessions.length} Online)
+                </h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  The following user tenants/admins are currently logged in right now and actively accessing their business workspace.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isRefreshingSessions}
+                onClick={async () => {
+                  setIsRefreshingSessions(true);
+                  // Sync with actual cloud database entries
+                  await pushServerSync();
+                  await pullServerSync();
+                  setActiveSessions(getActiveSessions());
+                  loadTenants(); // update online status blocks
+                  setIsRefreshingSessions(false);
+                  setSuccessMsg("Logged-in sessions successfully synchronized & refreshed!");
+                  setTimeout(() => setSuccessMsg(''), 2500);
+                }}
+                className={`text-[9px] font-mono text-indigo-400 uppercase font-black bg-indigo-950/40 hover:bg-indigo-950/80 px-2.5 py-1 rounded border border-indigo-500/20 transition cursor-pointer flex items-center gap-1.5 select-none ${isRefreshingSessions ? 'opacity-70 pointer-events-none' : ''}`}
+              >
+                <RefreshCw className={`w-3 ${isRefreshingSessions ? 'animate-spin' : ''}`} />
+                {isRefreshingSessions ? 'Synchronizing...' : 'Refresh Sessions List'}
+              </button>
+            </div>
+
+            {activeSessions.length === 0 ? (
+              <div className="text-center py-8 text-slate-500 text-xs italic bg-slate-950/30 rounded-xl border border-dashed border-slate-850/60">
+                👤 No users logged in currently. (Sessions prune after 5 minutes of inactivity)
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {activeSessions.map((session) => {
+                  const lastActiveDate = new Date(session.lastActiveTime);
+                  const secondsAgo = Math.max(0, Math.round((new Date().getTime() - lastActiveDate.getTime()) / 1000));
+                  let timeDisplay = 'Just now';
+                  if (secondsAgo >= 60) {
+                    const mins = Math.floor(secondsAgo / 60);
+                    timeDisplay = `${mins}m ago`;
+                  } else if (secondsAgo > 0) {
+                    timeDisplay = `${secondsAgo}s ago`;
+                  }
+
+                  const matchingTenant = tenants.find(t => t.id === session.userId);
+                  const matchingCustomer = customers.find(c => c.id === session.userId);
+
+                  const isCustomer = !!matchingCustomer || session.activeModule === 'Customer Portal';
+
+                  const isBlocked = isCustomer
+                    ? (matchingCustomer?.isBlocked === true)
+                    : (matchingTenant?.isActive === false);
+
+                  return (
+                    <div
+                      key={`${session.userId}-${session.email}`}
+                      className={`p-4 rounded-xl border transition-all duration-300 bg-slate-950/50 hover:bg-slate-950 relative overflow-hidden ${
+                        isBlocked
+                          ? 'border-rose-900/50 shadow-lg shadow-rose-950/5'
+                          : isCustomer
+                          ? 'border-sky-900/40 hover:border-sky-700/50 shadow-md shadow-sky-950/5'
+                          : 'border-slate-850 hover:border-slate-800 shadow-md shadow-black/10'
+                      }`}
+                    >
+                      {/* Live green dot pin */}
+                      <span className="absolute top-3 right-3 flex h-2 w-2">
+                        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isBlocked ? 'bg-rose-400' : isCustomer ? 'bg-sky-400' : 'bg-emerald-400'}`}></span>
+                        <span className={`relative inline-flex rounded-full h-2 w-2 ${isBlocked ? 'bg-rose-500' : isCustomer ? 'bg-sky-550' : 'bg-emerald-500'}`}></span>
+                      </span>
+
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-extrabold text-white text-xs truncate max-w-[155px]">
+                              {session.companyName || 'Unknown User'}
+                            </span>
+                            {isCustomer ? (
+                              <span className="bg-sky-950 text-sky-400 border border-sky-900/45 text-[8px] font-black px-1.5 py-0.2 rounded uppercase font-mono">👤 CUSTOMER</span>
+                            ) : (
+                              <span className="bg-indigo-950 text-indigo-400 border border-indigo-900/45 text-[8px] font-black px-1.5 py-0.2 rounded uppercase font-mono">💼 MERCHANT</span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-slate-400 block font-mono select-all truncate mt-0.5">
+                            {session.email}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1 text-[10px] font-mono text-slate-500">
+                          <p className="flex justify-between">
+                            <span>💻 System Access:</span>
+                            <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] border uppercase ${
+                              isCustomer
+                                ? 'text-sky-400 bg-sky-950/40 border-sky-500/10'
+                                : 'text-indigo-400 bg-indigo-950/40 border-indigo-500/10'
+                            }`}>
+                              {session.activeModule || 'Dashboard'}
+                            </span>
+                          </p>
+                          <p className="flex justify-between">
+                            <span>🕒 Active Pulse:</span>
+                            <span className="text-slate-300 font-bold">{timeDisplay}</span>
+                          </p>
+                          <p className="flex justify-between">
+                            <span>🌐 Console Device:</span>
+                            <span className="text-slate-400 text-right truncate max-w-[120px]" title={session.userAgent}>
+                              {session.deviceInfo || 'Browser'}
+                            </span>
+                          </p>
+                          <p className="flex justify-between">
+                            <span>🔌 IP Session:</span>
+                            <span className="text-slate-400 font-bold">{session.ipAddress || '192.168.1.84'}</span>
+                          </p>
+                          <p className="flex justify-between">
+                            <span>🔐 Access Security:</span>
+                            {isBlocked ? (
+                              <span className="text-rose-400 font-extrabold">BLOCKED</span>
+                            ) : (
+                              <span className="text-emerald-400 font-bold">ALLOWED</span>
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-900/60 flex justify-between items-center gap-2">
+                          {!isCustomer ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (matchingTenant) {
+                                  onImpersonate(matchingTenant);
+                                } else {
+                                  alert('Tenant matching key fallback triggered.');
+                                }
+                              }}
+                              className="flex-1 py-1 text-[9px] font-bold uppercase tracking-wider bg-indigo-950/50 hover:bg-indigo-600 border border-indigo-900/40 hover:border-indigo-500 text-indigo-300 hover:text-white rounded-lg transition-all text-center cursor-pointer"
+                            >
+                              Impersonate
+                            </button>
+                          ) : (
+                            <span className="flex-1 text-[9px] font-mono text-slate-500 italic p-1 border border-slate-900 bg-slate-950/30 rounded text-center">
+                              Guest Session Secure
+                            </span>
+                          )}
+
+                          {!session.userId.includes('demo') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isCustomer) {
+                                  handleToggleCustomerBlockGlobal(session.userId);
+                                } else {
+                                  handleToggleTenantBlockGlobal(session.userId);
+                                }
+                              }}
+                              className={`px-3 py-1 text-[9px] font-bold uppercase tracking-wider rounded-lg border transition duration-200 cursor-pointer text-center ${
+                                isBlocked
+                                  ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-900'
+                                  : 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900'
+                              }`}
+                            >
+                              {isBlocked ? 'Allow' : 'Block'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Active Logins & Live Activity Footprints Panel */}
@@ -804,7 +1146,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               <div>
                 <h3 className="text-white text-xs font-black uppercase tracking-wider flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-450 animate-ping shrink-0" />
-                  Live Footprints & Login History / حالیہ لاگ ان ہسٹری اور ایکشن
+                  Live Footprints & Login History
                 </h3>
                 <p className="text-[10px] text-slate-400 mt-0.5">Real-time terminal footprints detected across the network with active security command flags.</p>
               </div>
@@ -818,8 +1160,8 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                 No active sign-in traces captured in memory registers. All channels clear.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {accessLogs.slice(0, 6).map((log) => {
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[640px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+                {accessLogs.map((log) => {
                   const isMerchant = log.type === 'merchant';
                   const matchedTenant = tenants.find(t => t.id === log.targetId);
                   const matchedCustomer = customers.find(c => c.id === log.targetId);
@@ -861,11 +1203,11 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                           <p>⚡ Action: <strong className="text-indigo-400">{log.action}</strong></p>
                           <p className="truncate">🌐 Device: {log.userAgent || 'WebBrowser'}</p>
                           <p className="flex items-center gap-1 mt-1">
-                            Status: {isBlocked ? (
-                              <span className="text-rose-400 font-extrabold text-[9px]">🚫 ACCESS LOCKED (بلاک ہے)</span>
-                            ) : (
-                              <span className="text-emerald-400 font-extrabold text-[9px] animate-pulse">● ACTIVE / ALLOWED (فعال)</span>
-                            )}
+                              Status: {isBlocked ? (
+                               <span className="text-rose-400 font-extrabold text-[9px]">🚫 ACCESS LOCKED</span>
+                             ) : (
+                               <span className="text-emerald-400 font-extrabold text-[9px] animate-pulse">● ACTIVE / ALLOWED</span>
+                             )}
                           </p>
                         </div>
                       </div>
@@ -909,8 +1251,8 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                           {isSelfLog 
                             ? 'IMMUNE ROOT' 
                             : isBlocked 
-                            ? '✓ Allow (بحال کریں)' 
-                            : '🚫 Lock Access (بلاک)'
+                            ? '✓ Allow' 
+                            : '🚫 Lock Access'
                           }
                         </button>
                       </div>
@@ -953,8 +1295,8 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                   <th className="px-5 py-3.5">Registered Email</th>
                   <th className="px-5 py-3.5">Mobile Contact / Phone</th>
                   <th className="px-5 py-3.5">Store Brand Location</th>
-                  <th className="px-5 py-3.5">Created Date</th>
-                  <th className="px-5 py-3.5">Lock status</th>
+                  <th className="px-5 py-3.5">Registration & Login Trace</th>
+                  <th className="px-5 py-3.5">Approval & Lock Status</th>
                   <th className="px-5 py-3.5 text-right">Instant Command Actions</th>
                 </tr>
               </thead>
@@ -970,12 +1312,16 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                     const isSelf = item.type === 'merchant' && item.rawId === currentUser.id;
                     const isBlockedStatus = item.status === 'blocked';
 
+                    const isOnline = item.type === 'merchant' && activeSessions.some(sess => sess.userId === item.rawId);
+
                     return (
                       <tr key={`${item.type}-${item.rawId}`} className="hover:bg-slate-900/30 transition-colors">
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 select-none border ${
-                              item.type === 'merchant'
+                              isOnline
+                                ? 'bg-emerald-950/55 text-emerald-405 border-emerald-500/25 animate-pulse font-mono'
+                                : item.type === 'merchant'
                                 ? 'bg-indigo-950/50 text-indigo-400 border-indigo-900/30'
                                 : 'bg-sky-950/50 text-sky-400 border-sky-900/30 font-mono'
                             }`}>
@@ -990,7 +1336,13 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                                   <span className="bg-sky-950/70 border border-sky-900/40 text-sky-300 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide font-mono">👤 CUSTOMER</span>
                                 )}
                                 {isSelf && (
-                                  <span className="bg-violet-950/70 border border-violet-900/50 text-violet-400 text-[8px] px-1.5 py-0.5 rounded uppercase font-bold tracking-widest animate-pulse font-mono">YOU (میں)</span>
+                                  <span className="bg-violet-950/70 border border-violet-900/50 text-violet-400 text-[8px] px-1.5 py-0.5 rounded uppercase font-bold tracking-widest animate-pulse font-mono">YOU</span>
+                                )}
+                                {isOnline && (
+                                  <span className="bg-emerald-950 text-emerald-450 text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded border border-emerald-500/35 tracking-wider flex items-center gap-1 shrink-0 animate-pulse font-mono">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                                    ONLINE NOW
+                                  </span>
                                 )}
                                 
                                 {/* Row refresh button */}
@@ -1022,40 +1374,89 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                           <span className="text-slate-200 font-medium">{item.storeContext}</span>
                         </td>
                         <td className="px-5 py-4 text-slate-500 font-mono text-[10px]">
-                          {item.createdAt}
+                          <div className="space-y-1">
+                            <div><span className="text-slate-600 font-bold block sm:inline">Reg:</span> <span className="text-slate-300 font-medium">{item.createdAt}</span></div>
+                            {item.lastLoginTime ? (
+                              <div>
+                                <span className="text-slate-600 font-bold block sm:inline">Active:</span>{' '}
+                                <span className="text-amber-400 font-bold">
+                                  {new Date(item.lastLoginTime).toLocaleString('en-GB', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </span>
+                              </div>
+                            ) : (
+                              <div><span className="text-slate-600 font-bold block sm:inline">Active:</span> <span className="text-slate-500 italic">Never signed in</span></div>
+                            )}
+                          </div>
                         </td>
                         <td className="px-5 py-4">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] uppercase font-bold font-mono border ${
-                            isBlockedStatus
-                              ? 'bg-rose-950/80 text-rose-450 border-rose-900/40'
-                              : 'bg-emerald-950/80 text-emerald-400 border-emerald-900/40'
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${isBlockedStatus ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
-                            {isBlockedStatus ? 'BLOCKED (بلاک ہے)' : 'ACTIVE (فعال)'}
-                          </span>
+                          <div className="space-y-1 text-left">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] uppercase font-bold font-mono border ${
+                              isBlockedStatus
+                                ? 'bg-rose-950/80 text-rose-450 border-rose-900/40'
+                                : 'bg-emerald-950/80 text-emerald-400 border-emerald-900/40'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${isBlockedStatus ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
+                              {isBlockedStatus ? 'BLOCKED' : 'ACTIVE'}
+                            </span>
+                            
+                            <div className="pt-0.5">
+                              {item.isApproved ? (
+                                <span className="text-[8px] text-emerald-400 font-black bg-emerald-950/45 border border-emerald-550/25 px-1.5 py-0.5 rounded font-mono block w-max uppercase">
+                                  ✓ APPROVED
+                                </span>
+                              ) : (
+                                <span className="text-[8.5px] text-amber-400 font-black bg-amber-950/45 border border-amber-550/25 px-1.5 py-0.5 rounded font-mono block w-max animate-pulse uppercase">
+                                  ⏳ PENDING GATE
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </td>
                         <td className="px-5 py-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (isSelf) return;
-                              if (item.type === 'merchant') {
-                                handleToggleTenantBlockGlobal(item.rawId);
-                              } else {
-                                handleToggleCustomerBlockGlobal(item.rawId);
-                              }
-                            }}
-                            disabled={isSelf}
-                            className={`px-3 py-1.5 text-[10px] font-black uppercase rounded-lg border transition ${
-                              isSelf
-                                ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
-                                : isBlockedStatus
-                                ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-900 hover:text-white cursor-pointer shadow-lg shadow-emerald-950/10'
-                                : 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900 hover:text-white cursor-pointer shadow-lg shadow-rose-950/10'
-                            }`}
-                          >
-                            {isSelf ? 'ROOT IMMUNE' : isBlockedStatus ? '✓ ALLOW (بحال کریں)' : '🚫 BLOCK (بلاک کریں)'}
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5 font-sans">
+                            {!item.isApproved && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (item.type === 'merchant') {
+                                    const tenant = tenants.find(t => t.id === item.rawId);
+                                    if (tenant) handleApproveTenantQuick(tenant);
+                                  } else {
+                                    handleToggleCustomerApprovalGlobal(item.rawId);
+                                  }
+                                }}
+                                className="px-2.5 py-1.5 bg-amber-950 hover:bg-emerald-950 hover:text-emerald-300 border border-amber-900/30 hover:border-emerald-500/35 text-amber-300 rounded-lg text-[10px] font-extrabold uppercase transition-all cursor-pointer animate-pulse shrink-0"
+                              >
+                                Approve
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isSelf) return;
+                                if (item.type === 'merchant') {
+                                  handleToggleTenantBlockGlobal(item.rawId);
+                                } else {
+                                  handleToggleCustomerBlockGlobal(item.rawId);
+                                }
+                              }}
+                              disabled={isSelf}
+                              className={`px-3 py-1.5 text-[10px] font-black uppercase rounded-lg border transition shrink-0 ${
+                                isSelf
+                                  ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+                                  : isBlockedStatus
+                                  ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-900 hover:text-white cursor-pointer shadow-lg shadow-emerald-950/10'
+                                  : 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900 hover:text-white cursor-pointer shadow-lg shadow-rose-950/10'
+                              }`}
+                            >
+                               {isSelf ? 'ROOT IMMUNE' : isBlockedStatus ? '✓ ALLOW' : '🚫 BLOCK'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1109,11 +1510,11 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               <thead>
                 <tr className="border-b border-slate-850 bg-slate-900/60 uppercase text-[10px] tracking-wider text-slate-400 font-bold">
                   <th className="px-5 py-3.5">Company & Email Address</th>
-                  <th className="px-5 py-3.5">Registered</th>
+                  <th className="px-5 py-3.5">Registered / Last Login</th>
                   <th className="px-5 py-3.5">System Role</th>
+                  <th className="px-5 py-3.5">Approval Gate</th>
                   <th className="px-5 py-3.5">Gate Access</th>
                   <th className="px-5 py-3.5">License Status</th>
-                  <th className="px-5 py-3.5">Expiry Bound</th>
                   <th className="px-5 py-3.5 text-right">Master Authority Actions</th>
                 </tr>
               </thead>
@@ -1129,12 +1530,18 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                     const isDeactivated = tenant.isActive === false;
                     const isExpired = tenant.subscriptionStatus === 'expired';
                     
+                    const isOnline = activeSessions.some(sess => sess.userId === tenant.id);
+
                     return (
                       <tr key={tenant.id} className="hover:bg-slate-900/30 transition-colors">
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
-                              isDeactivated ? 'bg-slate-800 text-slate-500' : 'bg-indigo-950/50 text-indigo-400 border border-indigo-900/30 font-mono'
+                              isOnline
+                                ? 'bg-emerald-955/55 text-emerald-400 border border-emerald-500/25 animate-pulse font-mono'
+                                : isDeactivated
+                                ? 'bg-slate-800 text-slate-500'
+                                : 'bg-indigo-950/50 text-indigo-400 border border-indigo-900/30 font-mono'
                             }`}>
                               {tenant.companyName.substring(0, 2).toUpperCase()}
                             </div>
@@ -1144,23 +1551,67 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                                 {tenant.id === currentUser.id && (
                                   <span className="bg-indigo-950 text-indigo-400 text-[8px] tracking-wide uppercase px-1.5 py-0.5 rounded border border-indigo-900/50 font-mono">My Account</span>
                                 )}
+                                {isOnline && (
+                                  <span className="bg-emerald-955 text-emerald-400 text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded border border-emerald-555/25 tracking-wider flex items-center gap-1 shrink-0 animate-pulse font-mono">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                                    ONLINE NOW
+                                  </span>
+                                )}
                               </div>
                               <div className="text-slate-400 text-[11px] font-mono mt-0.5 select-all">{tenant.email}</div>
-                              <div className="text-slate-500 text-[9px] font-mono mt-0.5">Tenant Key: #{tenant.id}</div>
+                              <div className="text-slate-500 text-[9px] font-mono mt-0.5 flex items-center gap-1">
+                                <span>Tenant ID:</span>
+                                <span className="bg-slate-950 px-1 py-0.2 rounded text-[8.5px] border border-slate-850/60 select-all font-bold text-indigo-400">
+                                  {tenant.id}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-4 text-slate-400 font-mono text-[11px]">
-                          {tenant.createdAt || 'Demo Seeding'}
+                        <td className="px-5 py-4">
+                          <div className="space-y-1">
+                            <div className="text-[10px] text-slate-500 font-medium">Registered:</div>
+                            <div className="text-slate-300 font-mono text-[11px]">{tenant.createdAt || 'Demo Seeding'}</div>
+                            <div className="text-[10px] text-slate-500 font-medium pt-0.5">Last Login Time:</div>
+                            <div className="text-amber-400/90 font-mono text-[10.5px]">
+                              {tenant.lastLoginTime ? (
+                                new Date(tenant.lastLoginTime).toLocaleString('en-GB', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })
+                              ) : (
+                                <span className="text-slate-500 italic">No login record</span>
+                              )}
+                            </div>
+                          </div>
                         </td>
                         <td className="px-5 py-4">
                           <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wide ${
                             tenant.role === 'admin' 
-                              ? 'bg-amber-950/50 text-amber-400 border border-amber-900/30' 
+                              ? 'bg-amber-955/50 text-amber-400 border border-amber-900/30' 
                               : 'bg-slate-950 text-slate-400 border border-slate-850'
                           }`}>
                             {tenant.role || 'user'}
                           </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          {tenant.isApproved === false ? (
+                            <button
+                              type="button"
+                              onClick={() => handleApproveTenantQuick(tenant)}
+                              className="px-2.5 py-1 bg-amber-950/80 hover:bg-emerald-950 hover:text-emerald-300 border border-amber-500/30 hover:border-emerald-500/35 text-amber-300 rounded-full font-bold uppercase text-[9.5px] cursor-pointer flex items-center gap-1 transition animate-pulse"
+                              title="Pending Super Admin Approval. Click to permit database access."
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 animate-ping" />
+                              Pndg Approve
+                            </button>
+                          ) : (
+                            <span className="bg-emerald-950/40 text-emerald-400 border border-emerald-555/15 px-2 py-0.5 rounded-full font-bold uppercase text-[9.5px]">
+                              Approved
+                            </span>
+                          )}
                         </td>
                         <td className="px-5 py-4">
                           <button 
@@ -1169,49 +1620,47 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                             disabled={tenant.id === currentUser.id}
                             className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase transition ${
                               isDeactivated 
-                                ? 'bg-rose-950 text-rose-300 border border-rose-900/40 hover:bg-rose-900 cursor-pointer' 
-                                : 'bg-emerald-950 text-emerald-300 border border-emerald-900/40 hover:bg-emerald-900 cursor-pointer'
+                                ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-900/40 cursor-pointer' 
+                                : 'bg-emerald-955 text-emerald-300 border border-emerald-900/40 hover:bg-emerald-900 cursor-pointer'
                             } disabled:opacity-50 disabled:cursor-not-allowed`}
                           >
                             {isDeactivated ? (
                               <>
-                                <UserX className="w-3 h-3" />
+                                <UserX className="w-3 h-3 text-rose-450" />
                                 Blocked
                               </>
                             ) : (
                               <>
-                                <UserCheck className="w-3 h-3" />
-                                Enabled
+                                <UserCheck className="w-3 h-3 text-emerald-450" />
+                                Active
                               </>
                             )}
                           </button>
                         </td>
                         <td className="px-5 py-4">
-                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wide ${
-                            isExpired 
-                              ? 'bg-rose-950 text-rose-450' 
-                              : tenant.subscriptionStatus === 'inactive'
-                              ? 'bg-slate-950 text-slate-500'
-                              : 'bg-emerald-950/50 text-emerald-400 border border-emerald-900/20'
-                          }`}>
-                            {tenant.subscriptionStatus || 'active'}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                            <span className="font-mono text-[11px] text-slate-300">
-                              {tenant.subscriptionExpiry || 'No Bound' }
+                          <div className="space-y-1">
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wide ${
+                              isExpired 
+                                ? 'bg-rose-955 text-rose-455' 
+                                : tenant.subscriptionStatus === 'inactive'
+                                ? 'bg-slate-950 text-slate-500'
+                                : 'bg-emerald-950/50 text-emerald-400 border border-emerald-900/25'
+                            }`}>
+                              {tenant.subscriptionStatus || 'active'}
                             </span>
+                            <div className="font-mono text-[9px] text-slate-500 flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              <span>{tenant.subscriptionExpiry || 'No License Bound'}</span>
+                            </div>
                           </div>
                         </td>
                         <td className="px-5 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
                             {tenant.id !== currentUser.id && (
                               <button
                                 type="button"
                                 onClick={() => onImpersonate(tenant)}
-                                className="px-2.5 py-1 bg-indigo-950 hover:bg-indigo-900 border border-indigo-900/45 text-indigo-300 font-extrabold rounded-lg hover:text-white cursor-pointer text-[10.5px] flex items-center gap-1 transition-all"
+                                className="px-2 py-1 bg-indigo-950 hover:bg-indigo-900 border border-indigo-900/45 text-indigo-300 font-extrabold rounded-lg hover:text-white cursor-pointer text-[10.5px] flex items-center gap-1 transition-all"
                                 title="Full interactive diagnostic. Log in directly as this tenant brand."
                               >
                                 <Fingerprint className="w-3.5 h-3.5 text-indigo-400" />
@@ -1221,11 +1670,22 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                             <button
                               type="button"
                               onClick={() => handleOpenEdit(tenant)}
-                              className="p-1 px-2.5 bg-slate-850 hover:bg-slate-800 hover:text-white border border-slate-800 hover:border-slate-700 rounded-lg text-slate-300 cursor-pointer text-[11px] font-semibold flex items-center gap-1 transition"
+                              className="p-1 px-2 bg-slate-850 hover:bg-slate-800 hover:text-white border border-slate-800 hover:border-slate-700 rounded-lg text-slate-300 cursor-pointer text-[11px] font-semibold flex items-center gap-1 transition"
                             >
                               <Edit3 className="w-3 h-3" />
-                              Configure
+                              Edit
                             </button>
+                            {tenant.id !== currentUser.id && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTenantQuick(tenant)}
+                                className="p-1 px-2 bg-rose-955 border border-rose-900/40 text-rose-300 hover:text-white hover:bg-rose-900 rounded-lg cursor-pointer text-[11px] font-semibold flex items-center gap-1 transition"
+                                title="Permanently delete account"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-rose-450 hover:text-rose-222" />
+                                Delete
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1260,7 +1720,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               className="px-4 py-2.5 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 hover:text-white border border-indigo-900/50 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer font-mono shrink-0 font-bold"
             >
               <Users className="w-4 h-4 text-sky-400" />
-              Refresh Customers / گاہک ریفریش کریں
+              Refresh Customers
             </button>
           </div>
 
@@ -1268,9 +1728,9 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
             <table className="w-full border-collapse text-left text-xs text-slate-300 font-sans">
               <thead>
                 <tr className="border-b border-slate-850 bg-slate-900/60 uppercase text-[10px] tracking-wider text-slate-400 font-bold">
-                  <th className="px-5 py-3.5">Customer Name & ID (گاہک کا نام)</th>
-                  <th className="px-5 py-3.5">Contact Detail (رابطہ)</th>
-                  <th className="px-5 py-3.5">Associated Store / Business (مرچنٹ)</th>
+                  <th className="px-5 py-3.5">Customer Name & ID</th>
+                  <th className="px-5 py-3.5">Contact Detail</th>
+                  <th className="px-5 py-3.5">Associated Store / Business</th>
                   <th className="px-5 py-3.5">Registered Since</th>
                   <th className="px-5 py-3.5">Privilege Status</th>
                   <th className="px-5 py-3.5 text-right">Access Management Control</th>
@@ -1345,27 +1805,51 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                           {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}
                         </td>
                         <td className="px-5 py-4">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] uppercase font-bold font-mono border ${
-                            isBlocked
-                              ? 'bg-rose-950/35 text-rose-350 border-rose-900/40'
-                              : 'bg-emerald-950/35 text-emerald-350 border-emerald-900/40'
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${isBlocked ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
-                            {isBlocked ? 'BLOCKED (بلاک ہے)' : 'ACTIVE ALLOWED (فعال)'}
-                          </span>
+                          <div className="space-y-1">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] uppercase font-bold font-mono border ${
+                              isBlocked
+                                ? 'bg-rose-950/35 text-rose-350 border-rose-900/40'
+                                : 'bg-emerald-950/35 text-emerald-350 border-emerald-900/40'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${isBlocked ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
+                              {isBlocked ? 'BLOCKED (بلاک ہے)' : 'ACTIVE ALLOWED (فعال)'}
+                            </span>
+                            <div className="pt-0.5">
+                              {c.isApproved !== false ? (
+                                <span className="text-[8.5px] text-emerald-450 font-black bg-emerald-950/30 border border-emerald-900/25 px-1.5 py-0.5 rounded font-mono uppercase block w-max">
+                                  ✓ APPROVED (منظور شدہ)
+                                </span>
+                              ) : (
+                                <span className="text-[8.5px] text-amber-450 font-black bg-amber-950/30 border border-amber-900/25 px-1.5 py-0.5 rounded font-mono uppercase block w-max animate-pulse">
+                                  ⏳ PENDING GATE (منظوری کا انتظار)
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </td>
                         <td className="px-5 py-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleCustomerBlockGlobal(c.id)}
-                            className={`px-3 py-1.5 text-[10px] font-bold uppercase rounded-lg border transition cursor-pointer font-sans ${
-                              isBlocked
-                                ? 'bg-emerald-950 text-emerald-300 hover:text-white border-emerald-900 hover:bg-emerald-900'
-                                : 'bg-rose-950 text-rose-300 hover:text-white border-rose-900 hover:bg-rose-900'
-                            }`}
-                          >
-                            {isBlocked ? '✓ ALLOW (بحال کریں)' : '🚫 BLOCK (بلاک کریں)'}
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {c.isApproved === false && (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleCustomerApprovalGlobal(c.id)}
+                                className="px-2.5 py-1.5 bg-amber-950 hover:bg-emerald-950 text-amber-300 hover:text-emerald-300 border border-amber-900/45 hover:border-emerald-500/40 rounded-lg text-[10px] font-black uppercase transition cursor-pointer animate-pulse shrink-0 font-sans"
+                              >
+                                Approve (منظور کریں)
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleCustomerBlockGlobal(c.id)}
+                              className={`px-3 py-1.5 text-[10px] font-bold uppercase rounded-lg border transition cursor-pointer font-sans shrink-0 ${
+                                isBlocked
+                                  ? 'bg-emerald-950 text-emerald-300 hover:text-white border-emerald-900 hover:bg-emerald-900'
+                                  : 'bg-rose-950 text-rose-300 hover:text-white border-rose-900 hover:bg-rose-900'
+                              }`}
+                            >
+                              {isBlocked ? '✓ ALLOW (بحال کریں)' : '🚫 BLOCK (بلاک کریں)'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1397,11 +1881,12 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
             <div className="flex gap-2 justify-end sm:justify-start">
               <button
                 type="button"
+                disabled={isRefreshingLogs}
                 onClick={loadAccessLogsData}
-                className="px-3.5 py-2 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 hover:text-white border border-indigo-900/50 rounded-lg font-bold text-xs flex items-center gap-1.5 transition cursor-pointer font-mono"
+                className={`px-3.5 py-2 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 hover:text-white border border-indigo-900/50 rounded-lg font-bold text-xs flex items-center gap-1.5 transition cursor-pointer font-mono ${isRefreshingLogs ? 'opacity-70 pointer-events-none' : ''}`}
               >
-                <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                Refresh Logs / ریفریش کریں
+                <Activity className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshingLogs ? 'animate-spin' : 'animate-pulse'}`} />
+                {isRefreshingLogs ? 'Refreshing / ریفریش ہو رہا ہے...' : 'Refresh Logs / ریفریش کریں'}
               </button>
               <button
                 type="button"
@@ -1419,8 +1904,8 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
             <table className="w-full border-collapse text-left text-xs text-slate-300">
               <thead>
                 <tr className="border-b border-slate-850 bg-slate-900/60 uppercase text-[10px] tracking-wider text-slate-400 font-bold font-mono">
-                  <th className="px-5 py-3.5">Access Timestamp</th>
-                  <th className="px-5 py-3.5">User Identity</th>
+                  <th className="px-5 py-3.5">Capture / Log-in Time</th>
+                  <th className="px-5 py-3.5">User Identity & Tenant ID</th>
                   <th className="px-5 py-3.5">Contact / Email</th>
                   <th className="px-5 py-3.5">Identity Class</th>
                   <th className="px-5 py-3.5">System Activity Triggered</th>
@@ -1459,13 +1944,17 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                   }).map((log) => {
                     // Check live blocked state context
                     let isBlocked = false;
+                    let displayTenantId = 'N/A';
+                    
                     if (log.type === 'merchant') {
                       const matchedTenant = tenants.find(t => t.id === log.targetId || t.email.toLowerCase() === log.email.toLowerCase());
                       isBlocked = matchedTenant ? (matchedTenant.isActive === false) : false;
+                      displayTenantId = matchedTenant ? matchedTenant.id : log.targetId;
                     } else if (log.type === 'customer') {
                       const allCusts = getCustomersGlobal();
                       const matchedCustomer = allCusts.find(c => c.id === log.targetId || c.email.toLowerCase() === log.email.toLowerCase());
                       isBlocked = matchedCustomer ? (matchedCustomer.isBlocked === true) : false;
+                      displayTenantId = matchedCustomer ? matchedCustomer.tenantId : 'Unregistered';
                     }
 
                     return (
@@ -1480,7 +1969,10 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                           <div className="font-bold text-white text-sm">
                             {log.name}
                           </div>
-                          <span className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold font-mono">ID Ref: {log.targetId}</span>
+                          <div className="flex flex-col gap-0.5 mt-1">
+                            <span className="text-slate-500 text-[9px] uppercase tracking-wider font-semibold font-mono">User ID: #{log.targetId}</span>
+                            <span className="text-indigo-450 text-[10px] uppercase tracking-wider font-extrabold font-mono text-indigo-300">Tenant ID: {displayTenantId}</span>
+                          </div>
                         </td>
                         <td className="px-5 py-4 font-mono text-[11px] text-slate-300 select-all">
                           {log.email}
@@ -1494,7 +1986,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                             {log.type === 'merchant' ? '💼 Merchant' : '👤 Customer Partner'}
                           </span>
                         </td>
-                        <td className="px-5 py-4 max-w-xs truncate text-[11.5px] text-slate-300 font-medium">
+                        <td className="px-5 py-4 max-w-xs truncate text-[11.5px] text-slate-400 font-mono">
                           {log.action}
                         </td>
                         <td className="px-5 py-4">
@@ -1504,7 +1996,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                               : 'bg-emerald-950/80 text-emerald-400 border-emerald-900/40'
                           }`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${isBlocked ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
-                            {isBlocked ? 'ACCESS SUSPENDED (BLOCKED)' : 'ACCESS GRANTED (ACTIVE)'}
+                            {isBlocked ? 'ACCESS BLOCKED' : 'ACCESS ACTIVE'}
                           </span>
                         </td>
                         <td className="px-5 py-4 text-right">
@@ -1954,16 +2446,15 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                   >
                     <option value="en">English (EN)</option>
                     <option value="ar">العربية (AR)</option>
-                    <option value="ur">اردو (UR)</option>
                     <option value="hi">हिन्दी (HI)</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">VAT Rate (%)</label>
+                  <label className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">VAT Rate (%) (Optional)</label>
                   <input
                     type="number"
                     value={createTaxRate}
-                    onChange={(e) => setCreateTaxRate(Number(e.target.value))}
+                    onChange={(e) => setCreateTaxRate(e.target.value === '' ? '' : Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-xs text-white font-mono"
                   />
                 </div>
@@ -1972,7 +2463,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               {/* Tax Reference Registry */}
               <div className="grid grid-cols-2 gap-3.5">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">VAT registration ID (TRN)</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">VAT registration ID (TRN) (Optional)</label>
                   <input
                     type="text"
                     placeholder="E.g., 300482910390"
@@ -2200,12 +2691,11 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                   >
                     <option value="en">English (EN)</option>
                     <option value="ar">العربية (AR)</option>
-                    <option value="ur">اردو (UR)</option>
                     <option value="hi">हिन्दी (HI)</option>
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[9px] uppercase font-bold text-slate-450 tracking-wider">TRN Tax ID Ref</label>
+                  <label className="text-[9px] uppercase font-bold text-slate-450 tracking-wider">TRN Tax ID Ref (Optional)</label>
                   <input
                     type="text"
                     value={editTaxNumber}
@@ -2218,11 +2708,11 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               {/* Tax rate edit and default prefix */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[9px] uppercase font-bold text-slate-450 tracking-wider">Standard system Tax Rate (%)</label>
+                  <label className="text-[9px] uppercase font-bold text-slate-450 tracking-wider">Standard system Tax Rate (%) (Optional)</label>
                   <input
                     type="number"
                     value={editTaxRate}
-                    onChange={(e) => setEditTaxRate(Number(e.target.value))}
+                    onChange={(e) => setEditTaxRate(e.target.value === '' ? '' : Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-xs text-white font-mono"
                   />
                 </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserTenant, Expense } from '../types';
 import { translations, currencySymbols } from '../translations';
 import { getExpenses, addExpense, deleteExpense } from '../db';
@@ -33,6 +33,13 @@ export default function ExpensesModule({ user, onRefreshStats }: ExpensesModuleP
     setExpenses(list);
     onRefreshStats();
   };
+
+  useEffect(() => {
+    window.addEventListener('db-update', handleRefresh);
+    return () => {
+      window.removeEventListener('db-update', handleRefresh);
+    };
+  }, []);
 
   const handleCreateExpense = (e: React.FormEvent) => {
     e.preventDefault();

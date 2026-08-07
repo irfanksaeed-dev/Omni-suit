@@ -13,9 +13,21 @@ export default function ReportsModule({ user }: ReportsModuleProps) {
   const t = translations[user.language];
   const symbol = currencySymbols[user.currency];
 
-  const sales = useMemo(() => getSales(user.id), [user.id]);
-  const expenses = useMemo(() => getExpenses(user.id), [user.id]);
-  const products = useMemo(() => getProducts(user.id), [user.id]);
+  const [dbKey, setDbKey] = useState(0);
+
+  React.useEffect(() => {
+    const handleDbUpdate = () => {
+      setDbKey(v => v + 1);
+    };
+    window.addEventListener('db-update', handleDbUpdate);
+    return () => {
+      window.removeEventListener('db-update', handleDbUpdate);
+    };
+  }, []);
+
+  const sales = useMemo(() => getSales(user.id), [user.id, dbKey]);
+  const expenses = useMemo(() => getExpenses(user.id), [user.id, dbKey]);
+  const products = useMemo(() => getProducts(user.id), [user.id, dbKey]);
 
   const [activeTab, setActiveTab] = useState<'monthly' | 'yearly' | 'products'>('monthly');
 

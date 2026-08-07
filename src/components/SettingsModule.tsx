@@ -116,7 +116,7 @@ export default function SettingsModule({ user, onUpdateUser }: SettingsModulePro
 
             {/* Base64 Logo Uploader */}
             <div className="space-y-1">
-              <label className="font-bold text-slate-400">Company Logo / لوگو اپ لوڈ کریں</label>
+              <label className="font-bold text-slate-400">Company Logo</label>
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mt-1 bg-slate-950/50 p-3 rounded-2xl border border-slate-850">
                 {logoUrl ? (
                   <div className="relative group shrink-0">
@@ -187,12 +187,11 @@ export default function SettingsModule({ user, onUpdateUser }: SettingsModulePro
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-400">{t.taxRatePercentage} *</label>
+                <label className="font-bold text-slate-400">{t.taxRatePercentage} (Optional)</label>
                 <input
                   type="number"
                   step="0.01"
-                  required
-                  placeholder="5"
+                  placeholder="0"
                   value={taxRate}
                   onChange={(e) => setTaxRate(e.target.value)}
                   className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-white"

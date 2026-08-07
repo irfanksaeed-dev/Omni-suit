@@ -11,7 +11,9 @@ import {
   pullServerSync,
   getSupportChats,
   addChatMessage,
-  markChatAsRead
+  markChatAsRead,
+  getInvoices,
+  resolveTenantByCode
 } from './db';
 import { UserTenant, Customer, DashboardStats, Language } from './types';
 import { translations } from './translations';
@@ -27,6 +29,8 @@ import InventoryModule from './components/InventoryModule';
 import ReportsModule from './components/ReportsModule';
 import SettingsModule from './components/SettingsModule';
 import AdminModule from './components/AdminModule';
+import PurchasesModule from './components/PurchasesModule';
+import AIAgentWidget from './components/AIAgentWidget';
 import { 
   LayoutDashboard, 
   Receipt, 
@@ -51,7 +55,8 @@ import {
   Clock,
   MessageCircle,
   ShieldAlert,
-  RefreshCw
+  RefreshCw,
+  ShoppingCart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -97,102 +102,125 @@ export default function App() {
 
   // Loading sync state for first mount
   const [loadingSync, setLoadingSync] = useState(true);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
 
-  // Load and initialize database & parse URL magic login parameters
-  useEffect(() => {
-    async function initAndSync() {
-      try {
-        const res = await fetch(getApiUrl('/api/db'));
-        if (res.ok) {
-          const cloudDb = await res.json();
-          const SYNC_KEYS = [
-            'biz_suite_tenants',
-            'biz_suite_customers',
-            'biz_suite_products',
-            'biz_suite_invoices',
-            'biz_suite_sales',
-            'biz_suite_expenses',
-            'biz_suite_access_logs'
-          ];
-          SYNC_KEYS.forEach(key => {
-            if (cloudDb && cloudDb[key] !== undefined) {
-              localStorage.setItem(key, JSON.stringify(cloudDb[key]));
-            }
-          });
+  function processUrlAndSessionParams() {
+    // Check for Magic direct login links
+    const params = new URLSearchParams(window.location.search);
+    const paramTenantId = params.get('tenantId');
+    const paramCode = params.get('code') || params.get('shortcode') || params.get('shortCode') || params.get('sharecode') || params.get('shareCode');
+    const paramAutologin = params.get('autologin');
+    const paramCustEmail = params.get('customerEmail');
+    const paramCustPhone = params.get('customerPhone');
+    const paramInvoiceId = params.get('invoiceId');
+
+    if (paramInvoiceId) {
+      setInitialInvoiceId(paramInvoiceId);
+    }
+
+    // Support pathname-based auto-login (e.g. /OMNI-T7TYFJF or /t7tyfjf)
+    let pathCode = '';
+    if (typeof window !== 'undefined' && window.location) {
+      const pathname = (window.location.pathname || '').replace(/^\//, '').trim();
+      // Only process as direct shortcode if it has a length of 5+ and doesn't match a known system module route name
+      if (pathname && pathname.length >= 5 && !['dashboard', 'admin', 'customers', 'products', 'invoices', 'sales', 'expenses', 'purchases'].includes(pathname.toLowerCase())) {
+        pathCode = pathname;
+      }
+    }
+
+    // Support query keys that are direct short codes themselves (e.g. ?OMNI-T7TYFJF or ?t7tyfjf)
+    let queryKeyCode = '';
+    for (const key of params.keys()) {
+      if (key && (key.toUpperCase().startsWith('OMNI-') || key.toLowerCase().startsWith('tenant-') || key.length === 7)) {
+        queryKeyCode = key;
+        break;
+      }
+    }
+
+    let actionDone = false;
+
+    // Check if there is any tenant identifier provided (via tenantId / code parameters, path code, or search key code)
+    const rawSearchCode = (paramTenantId || paramCode || pathCode || queryKeyCode || '').trim();
+    if (rawSearchCode) {
+      const matched = resolveTenantByCode(rawSearchCode, getTenants());
+      if (matched && matched.isActive !== false && matched.isApproved !== false) {
+        logAccess('merchant', matched.id, matched.companyName, matched.email, 'Accessed ERP workspace via magic direct link/shortcode');
+        setActiveUser(matched);
+        setUser(matched);
+        setLang(matched.language);
+        setStats(getDashboardStats(matched.id));
+        
+        // Clean URL to home root for clean aesthetic and prevention of stale login loops
+        window.history.replaceState({}, document.title, window.location.origin + '/');
+        actionDone = true;
+      }
+    }
+
+    if (!actionDone && paramAutologin) {
+      const matched = getTenants().find(t => t.email.toLowerCase() === paramAutologin.toLowerCase() && t.isActive !== false);
+      if (matched) {
+        logAccess('merchant', matched.id, matched.companyName, matched.email, 'Accessed ERP workspace via login email signature link');
+        setActiveUser(matched);
+        setUser(matched);
+        setLang(matched.language);
+        setStats(getDashboardStats(matched.id));
+        if (matched.email.toLowerCase() === 'irfanksaeed@gmail.com') {
+          setActiveModule('admin');
         }
-      } catch (err: any) {
-        console.warn('Unable to pull cloud database. Continuing with offline local storage fallback:', err.message || err);
+        window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+        actionDone = true;
       }
-
-      initializeDatabase();
-
-      // Ensure any first-time automatically seeded records (or newly-created tenant profiles) are synced back to the persistent file on the server
-      try {
-        const dbData: Record<string, any> = {};
-        const SYNC_KEYS = [
-          'biz_suite_tenants',
-          'biz_suite_customers',
-          'biz_suite_products',
-          'biz_suite_invoices',
-          'biz_suite_sales',
-          'biz_suite_expenses',
-          'biz_suite_access_logs'
-        ];
-        SYNC_KEYS.forEach(key => {
-          const val = localStorage.getItem(key);
-          if (val) {
-            dbData[key] = JSON.parse(val);
-          }
-        });
-        await fetch(getApiUrl('/api/db'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(dbData)
-        });
-      } catch (err: any) {
-        console.warn('Initialization backup cloud synchronization is currently offline:', err.message || err);
-      }
-
-      // Check for Magic direct login links
-      const params = new URLSearchParams(window.location.search);
-      const paramTenantId = params.get('tenantId');
-      const paramAutologin = params.get('autologin');
-      const paramCustEmail = params.get('customerEmail');
-      const paramCustPhone = params.get('customerPhone');
-      const paramInvoiceId = params.get('invoiceId');
-
+    } else if (paramInvoiceId || paramCustEmail || paramCustPhone) {
       if (paramInvoiceId) {
-        setInitialInvoiceId(paramInvoiceId);
+        // Direct public access to specific invoice! Anyone can open it.
+        const tenants = getTenants();
+        let foundInv: any = null;
+        let foundTenant: any = null;
+        for (const t of tenants) {
+          const invs = getInvoices(t.id);
+          const i = invs.find(inv => inv.id === paramInvoiceId);
+          if (i) {
+            foundInv = i;
+            foundTenant = t;
+            break;
+          }
+        }
+        if (foundInv && foundTenant) {
+          // Attempt to find actual registered customer matching the invoice to load their full portal if possible
+          let matchedCustomer: Customer | undefined;
+          if (foundInv.customerId) {
+            const allCustsStr = localStorage.getItem('biz_suite_customers');
+            if (allCustsStr) {
+              try {
+                const parsed = JSON.parse(allCustsStr) as Customer[];
+                matchedCustomer = parsed.find(c => c.id === foundInv.customerId && c.tenantId === foundTenant.id);
+              } catch (e) {}
+            }
+          }
+
+          const guestCustomer: Customer = matchedCustomer || {
+            id: 'guest-' + foundInv.id,
+            tenantId: foundTenant.id,
+            name: foundInv.customerName || 'Customer / گاہک',
+            email: paramCustEmail || 'guest@portal.guest',
+            phone: paramCustPhone || '',
+            address: 'Direct Link Access',
+            createdAt: foundInv.createdAt,
+            isApproved: true,
+          };
+          logAccess('customer', guestCustomer.id, guestCustomer.name, guestCustomer.email || 'None', `Accessed Invoice ${foundInv.invoiceNumber} via direct public link`);
+          setActiveCustomer(guestCustomer);
+          setCustomerTenant(foundTenant);
+          setLang(foundTenant.language);
+          window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+          actionDone = true;
+        }
       }
 
-      let actionDone = false;
-
-      if (paramTenantId) {
-        const matched = getTenants().find(t => t.id === paramTenantId && t.isActive !== false);
-        if (matched) {
-          logAccess('merchant', matched.id, matched.companyName, matched.email, 'Accessed ERP workspace via magic direct link');
-          setActiveUser(matched);
-          setUser(matched);
-          setLang(matched.language);
-          setStats(getDashboardStats(matched.id));
-          // Remove parameters from URL bar silently
-          window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
-          actionDone = true;
-        }
-      } else if (paramAutologin) {
-        const matched = getTenants().find(t => t.email.toLowerCase() === paramAutologin.toLowerCase() && t.isActive !== false);
-        if (matched) {
-          logAccess('merchant', matched.id, matched.companyName, matched.email, 'Accessed ERP workspace via login email signature link');
-          setActiveUser(matched);
-          setUser(matched);
-          setLang(matched.language);
-          setStats(getDashboardStats(matched.id));
-          window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
-          actionDone = true;
-        }
-      } else if (paramCustEmail || paramCustPhone) {
+      if (!actionDone && (paramCustEmail || paramCustPhone)) {
         const searchVal = paramCustEmail || paramCustPhone || '';
-        const matches = customerLoginLookup(searchVal);
+        const matches = searchVal ? customerLoginLookup(searchVal) : [];
         const activeMatches = matches.filter(m => !m.customer.isBlocked);
         if (activeMatches.length > 0) {
           const first = activeMatches[0];
@@ -204,30 +232,130 @@ export default function App() {
           actionDone = true;
         }
       }
-
-      if (!actionDone) {
-        const active = getActiveUser();
-        if (active) {
-          logAccess('merchant', active.id, active.companyName, active.email, 'Opened/Resumed persistent cloud ERP session');
-          setUser(active);
-          setLang(active.language);
-          setStats(getDashboardStats(active.id));
-        }
-      }
-
-      // Restore impersonation backup context on full reload
-      const storedBackup = localStorage.getItem('biz_suite_original_admin');
-      if (storedBackup) {
-        try {
-          setImpersonatingFrom(JSON.parse(storedBackup));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-
-      setLoadingSync(false);
     }
 
+    if (!actionDone) {
+      const active = getActiveUser();
+      if (active) {
+        logAccess('merchant', active.id, active.companyName, active.email, 'Opened/Resumed persistent cloud ERP session');
+        setUser(active);
+        setLang(active.language);
+        setStats(getDashboardStats(active.id));
+      }
+    }
+
+    // Restore impersonation backup context on full reload
+    const storedBackup = localStorage.getItem('biz_suite_original_admin');
+    if (storedBackup) {
+      try {
+        setImpersonatingFrom(JSON.parse(storedBackup));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
+  async function initAndSync(forceOffline = false) {
+    if (forceOffline) {
+      initializeDatabase();
+      processUrlAndSessionParams();
+      setSyncError(null);
+      setLoadingSync(false);
+      return;
+    }
+
+    setSyncError(null);
+    setIsRetrying(true);
+
+    try {
+      // Set up simple 3-second abort signal
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, 3000);
+
+      const res = await fetch(getApiUrl('/api/db'), { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const cloudDb = await res.json();
+        const SYNC_KEYS = [
+          'biz_suite_tenants',
+          'biz_suite_customers',
+          'biz_suite_products',
+          'biz_suite_invoices',
+          'biz_suite_sales',
+          'biz_suite_expenses',
+          'biz_suite_access_logs',
+          'biz_suite_support_chats',
+          'biz_suite_active_sessions',
+          'biz_suite_purchases'
+        ];
+        SYNC_KEYS.forEach(key => {
+          if (cloudDb && cloudDb[key] !== undefined) {
+            localStorage.setItem(key, JSON.stringify(cloudDb[key]));
+          }
+        });
+      } else {
+        throw new Error(`Server returned error status ${res.status}`);
+      }
+
+      initializeDatabase();
+
+      // Non-blocking POST sync
+      try {
+        const dbData: Record<string, any> = {};
+        const SYNC_KEYS = [
+          'biz_suite_tenants',
+          'biz_suite_customers',
+          'biz_suite_products',
+          'biz_suite_invoices',
+          'biz_suite_sales',
+          'biz_suite_expenses',
+          'biz_suite_access_logs',
+          'biz_suite_support_chats',
+          'biz_suite_active_sessions',
+          'biz_suite_purchases'
+        ];
+        SYNC_KEYS.forEach(key => {
+          const val = localStorage.getItem(key);
+          if (val) {
+            dbData[key] = JSON.parse(val);
+          }
+        });
+        
+        const postController = new AbortController();
+        const postTimeout = setTimeout(() => postController.abort(), 2000);
+        fetch(getApiUrl('/api/db'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dbData),
+          signal: postController.signal
+        }).then(() => clearTimeout(postTimeout)).catch(() => clearTimeout(postTimeout));
+      } catch (err) {}
+
+      processUrlAndSessionParams();
+      setLoadingSync(false);
+    } catch (err: any) {
+      console.warn('Unable to pull cloud database. Continuing with offline local storage fallback:', err.message || err);
+      
+      // Auto-fallback to local DB storage so direct links still work flawlessly even offline
+      try {
+        initializeDatabase();
+        processUrlAndSessionParams();
+      } catch (innerErr) {
+        console.error("Critical inner local database initialisation failure:", innerErr);
+      }
+      
+      // Stop the loader and proceed
+      setLoadingSync(false);
+    } finally {
+      setIsRetrying(false);
+    }
+  }
+
+  // Load and initialize database & parse URL magic login parameters
+  useEffect(() => {
     initAndSync();
   }, []);
 
@@ -249,12 +377,18 @@ export default function App() {
     updateActiveSession(user.id, user.email, user.companyName, activeModule);
     setChatMessages(getSupportChats());
 
+    let ticksSinceLastActiveSessionPing = 0;
+
     const interval = setInterval(async () => {
       // 1. Fetch fresh JSON DB from server to capture live chat and block changes
       await pullServerSync();
 
-      // 2. Ping active session online status
-      updateActiveSession(user.id, user.email, user.companyName, activeModule);
+      // 2. Ping active session online status - update server only every 60 seconds (15 ticks of 4s) to conserve Firestore quota
+      ticksSinceLastActiveSessionPing++;
+      if (ticksSinceLastActiveSessionPing >= 15) {
+        updateActiveSession(user.id, user.email, user.companyName, activeModule);
+        ticksSinceLastActiveSessionPing = 0;
+      }
 
       // 3. Keep tenants list synchronized
       const tenantsList = getTenants();
@@ -283,6 +417,38 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [user, activeModule]);
+
+  // Update customer active session online status periodically
+  useEffect(() => {
+    if (!activeCustomer || !customerTenant) return;
+
+    // Direct initial call
+    updateActiveSession(
+      activeCustomer.id,
+      activeCustomer.email,
+      activeCustomer.name,
+      'Customer Portal'
+    );
+
+    let ticksSinceLastActiveSessionPing = 0;
+    const interval = setInterval(async () => {
+      // Pull fresh data to capture any block updates or messaging updates
+      await pullServerSync();
+
+      ticksSinceLastActiveSessionPing++;
+      if (ticksSinceLastActiveSessionPing >= 15) {
+        updateActiveSession(
+          activeCustomer.id,
+          activeCustomer.email,
+          activeCustomer.name,
+          'Customer Portal'
+        );
+        ticksSinceLastActiveSessionPing = 0;
+      }
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [activeCustomer, customerTenant]);
 
   // Read message handler upon expanding chat panel
   useEffect(() => {
@@ -350,6 +516,18 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    const handleDbUpdate = () => {
+      if (user) {
+        setStats(getDashboardStats(user.id));
+      }
+    };
+    window.addEventListener('db-update', handleDbUpdate);
+    return () => {
+      window.removeEventListener('db-update', handleDbUpdate);
+    };
+  }, [user]);
+
   const handleAuthSuccess = (authenticatedUser: UserTenant) => {
     setUser(authenticatedUser);
     setLang(authenticatedUser.language);
@@ -399,22 +577,68 @@ export default function App() {
   // Loading overlay while completing negotiation with central store
   if (loadingSync) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center font-sans tracking-tight text-slate-100">
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center font-sans tracking-tight text-slate-100 p-4">
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.2 }}
-          className="text-center space-y-6 max-w-sm px-6"
+          className="text-center space-y-6 max-w-md w-full px-6 py-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl relative overflow-hidden"
         >
+          {syncError && (
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500 animate-pulse" />
+          )}
+
           <div className="relative flex justify-center">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center col-span-1">
-              <Loader2 className="w-7 h-7 text-indigo-400 animate-spin" />
+            {syncError ? (
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                <AlertTriangle className="w-7 h-7 text-amber-400" />
+              </div>
+            ) : (
+              <div className="w-16 h-16 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center">
+                <Loader2 className="w-7 h-7 text-indigo-400 animate-spin" />
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="font-extrabold text-lg text-white">
+              {syncError ? "Secure Cloud Sync Interrupted" : "Connecting Secure Cloud"}
+            </h2>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              {syncError 
+                ? "The secure network link timed out or is temporarily unavailable. Your local work is safely cached and fully operational."
+                : "Negotiating ERP records and merchant isolation..."
+              }
+            </p>
+            {syncError && (
+              <p className="text-[11px] font-mono text-amber-500 bg-amber-500/5 py-1 px-3 rounded-md inline-block max-w-full truncate mt-1">
+                {syncError}
+              </p>
+            )}
+          </div>
+
+          {syncError ? (
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <button
+                onClick={() => initAndSync(true)}
+                className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-750 active:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold font-sans transition-all duration-150 border border-slate-700/50 shadow-sm cursor-pointer"
+              >
+                Proceed Offline (Local Cache)
+              </button>
+              <button
+                onClick={() => initAndSync(false)}
+                disabled={isRetrying}
+                className="flex-1 py-2.5 px-4 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white disabled:opacity-50 rounded-xl text-xs font-bold font-sans shadow-lg shadow-indigo-500/10 hover:shadow-indigo-500/20 active:scale-[0.98] transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {isRetrying ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                Retry Connection
+              </button>
             </div>
-          </div>
-          <div className="space-y-1">
-            <h2 className="font-extrabold text-base text-white">Connecting Secure Cloud</h2>
-            <p className="text-xs text-slate-400">Negotiating ERP records and merchant isolation...</p>
-          </div>
+          ) : null}
         </motion.div>
       </div>
     );
@@ -501,9 +725,9 @@ export default function App() {
             
             <div className="space-y-2">
               <h2 className="font-extrabold text-xl text-white tracking-tight">
-                {isBanned && "Account Suspended & Blocked (اکاؤنٹ معطل ہے)"}
-                {isSuspended && "Account Temporarily Suspended (اکاؤنٹ عارضی معطل ہے)"}
-                {isTimeRestricted && "Access Hours Restricted (رسائی ممنوع ہے)"}
+                {isBanned && "Account Suspended & Blocked"}
+                {isSuspended && "Account Temporarily Suspended"}
+                {isTimeRestricted && "Access Hours Restricted"}
               </h2>
               <p className="text-xs text-rose-400 font-medium">
                 Surity & subscription rules are managed in real-time by the central administration.
@@ -513,17 +737,12 @@ export default function App() {
 
           <div className="bg-slate-950/60 p-5 rounded-2xl border border-rose-500/10 space-y-4">
             <h3 className="text-[10px] font-bold text-rose-300 uppercase tracking-wider flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> Rule Enforcement Details / ضوابط کی تفصیلات
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> Rule Enforcement Details
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
               {isBanned && "Your business subscription has been permanently deactivated or locked by system administration due to billing terms, policy non-compliance, or suspended tenant parameters."}
               {isSuspended && `Your account accessibility has been suspended temporarily. Access will automatically restore after the suspension period ends on: ${new Date(user.tempSuspendedUntil!).toLocaleDateString()}.`}
               {isTimeRestricted && `Security rules permit active terminal operations strictly between daily window: ${user.allowedHoursStart} and ${user.allowedHoursEnd}. Your device terminal is currently outside permitted hours.`}
-            </p>
-            <p className="text-xs text-slate-400 leading-relaxed border-t border-slate-800/60 pt-3">
-              {isBanned && "آپ کا بزنس اکاؤنٹ انتظامیہ کی جانب سے بلاک کر دیا گیا ہے۔ ادائیگی کے مسائل یا ڈومین ضوابط کی خلاف ورزی کی وجہ سے رسائی معطل ہو چکی ہے۔"}
-              {isSuspended && `آپ کا اکاؤنٹ عارضی طور پر معطل ہے۔ معطلی کے ختم ہونے کی تاریخ: ${new Date(user.tempSuspendedUntil!).toLocaleDateString()}`}
-              {isTimeRestricted && `سیکورٹی قوانین کے تحت آپ کا ادارہ صرف اوقات کار یعنی ${user.allowedHoursStart} سے ${user.allowedHoursEnd} تک ہی سسٹم کھول سکتا ہے۔`}
             </p>
           </div>
 
@@ -538,7 +757,7 @@ export default function App() {
               onClick={handleSignOut}
               className="px-6 py-3 bg-slate-800 hover:bg-slate-750 font-bold text-xs text-slate-300 rounded-xl transition border border-white/5 uppercase tracking-wider cursor-pointer"
             >
-              Sign Out / لاگ آؤٹ کریں
+              Sign Out
             </button>
           </div>
         </motion.div>
@@ -564,6 +783,7 @@ export default function App() {
     { id: 'products', label: t.products, icon: Package },
     { id: 'invoices', label: t.invoices, icon: FileText },
     { id: 'inventory', label: t.inventory, icon: Layers },
+    { id: 'purchases', label: 'Purchase Records', icon: ShoppingCart },
     { id: 'reports', label: t.reports, icon: BarChart2 },
     ...(isAdmin ? [{ id: 'admin', label: 'Admin Panel', icon: Shield }] : []),
     { id: 'settings', label: t.companySettings, icon: Settings },
@@ -703,7 +923,7 @@ export default function App() {
               title="Queries fresh ERP records and coordinates live synchronization with persistent store"
             >
               <RefreshCw className={`w-3.5 h-3.5 shrink-0 text-indigo-400 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span>{isRefreshing ? (isRtl ? 'ریفریش ہو رہا ہے...' : 'Refreshing...') : (isRtl ? 'ایپ ریفریش کریں' : 'Refresh Entire App')}</span>
+              <span>{isRefreshing ? 'Refreshing...' : 'Refresh Entire App'}</span>
             </button>
 
             <button
@@ -745,19 +965,15 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     <h2 className="font-extrabold text-lg text-white tracking-tight">Access Restricted</h2>
-                    <h3 className="text-sm font-semibold text-amber-550 font-urdu leading-none">مخصوص ماڈیول بلاک ہے</h3>
                     <p className="text-xs text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
                       Your business subscription plan has restricted access to this module. Please contact your system administrator (Irfan) to revise billing parameters and permissions.
-                    </p>
-                    <p className="text-xs text-slate-500 font-urdu leading-normal">
-                      انتظامیہ کی طرف سے آپ کا یہ مخصوص سیکشن معطل کر دیا گیا ہے۔ بحالی کے لیے سپورٹ چیٹ یا ای میل پر رابطہ کریں۔
                     </p>
                   </div>
                   <button 
                     onClick={() => setActiveModule('dashboard')}
                     className="px-6 py-2 bg-slate-800 hover:bg-slate-755 text-xs font-bold text-slate-200 rounded-xl transition border border-white/5 cursor-pointer"
                   >
-                    Return to Dashboard / ڈیش بورڈ پر جائیں
+                    Return to Dashboard
                   </button>
                 </div>
               ) : (
@@ -770,7 +986,7 @@ export default function App() {
                         type="button"
                       >
                         <span className="text-sm font-semibold">←</span>
-                        <span>{isRtl ? 'ڈیش بورڈ پر واپس جائیں' : 'Back to Dashboard'}</span>
+                        <span>Back to Dashboard</span>
                       </button>
                     </div>
                   )}
@@ -794,6 +1010,9 @@ export default function App() {
                   )}
                   {activeModule === 'inventory' && (
                     <InventoryModule user={user} onRefreshStats={handleRefreshStats} onNavigate={setActiveModule} />
+                  )}
+                  {activeModule === 'purchases' && (
+                    <PurchasesModule user={user} onRefreshStats={handleRefreshStats} />
                   )}
                   {activeModule === 'reports' && (
                     <ReportsModule user={user} />
@@ -865,11 +1084,10 @@ export default function App() {
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-4">
                       <MessageSquare className="w-10 h-10 text-slate-600 stroke-[1.5]" />
                       <div className="space-y-1">
-                        <p className="text-xs font-semibold text-slate-300">No Messages Yet / چیٹ خالی ہے</p>
+                        <p className="text-xs font-semibold text-slate-300">No Messages Yet</p>
                         <p className="text-[10px] text-slate-500 leading-normal max-w-[200px] mx-auto">
                           Send a support appeal or query directly to Super Admin Irfan. Message history is fully persistent.
                         </p>
-                        <p className="text-[10px] text-slate-550 font-urdu leading-tight">سپر ایڈمن عرفان کو پیغام ارسال کرنے کے لیے نیچے کمنٹ باکس میں لکھیں۔</p>
                       </div>
                     </div>
                   ) : (
@@ -915,7 +1133,7 @@ export default function App() {
                     type="text"
                     value={chatText}
                     onChange={(e) => setChatText(e.target.value)}
-                    placeholder="Type a message (پیغام لکھیں)..."
+                    placeholder="Type a message..."
                     className="flex-1 bg-slate-900 border border-indigo-500/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/30 transition shadow-inner font-normal"
                   />
                   <button
@@ -944,6 +1162,9 @@ export default function App() {
           </motion.button>
         </div>
       )}
+
+      {/* 5. Embedded Grounded AI Assistant Agent */}
+      <AIAgentWidget user={user} />
 
       {/* Embedded CSS rules for printable invoices */}
       <style>{`

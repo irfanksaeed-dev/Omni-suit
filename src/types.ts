@@ -26,6 +26,8 @@ export interface UserTenant {
   allowedHoursStart?: string; // "HH:MM" start limit
   allowedHoursEnd?: string; // "HH:MM" end limit
   tempSuspendedUntil?: string; // ISO date format suspension expiry
+  isApproved?: boolean; // Super admin approval status
+  lastLoginTime?: string; // Last login timestamp
 }
 
 export interface ChatMessage {
@@ -115,6 +117,7 @@ export interface Sale {
   description: string;
   paymentMethod: 'cash' | 'card' | 'bank' | 'other';
   createdAt: string;
+  items?: InvoiceItem[]; // Optional itemized products for the sale checkout integration
 }
 
 export interface Expense {
@@ -125,6 +128,21 @@ export interface Expense {
   date: string;
   description: string;
   recipient: string;
+  createdAt: string;
+}
+
+export interface PurchaseRecord {
+  id: string;
+  tenantId: string;
+  supplierName: string;
+  itemName: string;
+  sku: string;
+  quantity: number;
+  unitCost: number;
+  totalCost: number;
+  date: string;
+  paymentStatus: 'paid' | 'unpaid' | 'pending';
+  paymentMethod: 'cash' | 'card' | 'bank' | 'other';
   createdAt: string;
 }
 
@@ -147,3 +165,34 @@ export interface DashboardStats {
   customerCount: number;
   lowStockCount: number;
 }
+
+export interface CustomerPayment {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  amount: number;
+  date: string;
+  paymentMethod: 'cash' | 'card' | 'bank' | 'other';
+  referenceNote?: string;
+  createdAt: string;
+}
+
+export interface CustomerReturnItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  price: number;
+  total: number;
+}
+
+export interface CustomerReturn {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  date: string;
+  items: CustomerReturnItem[];
+  totalAmount: number;
+  notes?: string;
+  createdAt: string;
+}
+

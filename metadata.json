@@ -1,5 +1,5 @@
 {
-  "name": "Complete Business Suite",
+  "name": "Omni-Suite",
   "description": "Multi-tenant business ERP suite with Sales, Expenses, Customers, Inventory, printable Invoices, Reports, and multilingual and multi-currency support.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

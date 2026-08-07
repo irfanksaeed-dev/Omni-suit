@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserTenant, Product } from '../types';
 import { translations, currencySymbols } from '../translations';
 import { getProducts, addProduct, editProduct, deleteProduct, getNextProductId } from '../db';
-import { Plus, Search, Trash2, Edit2, Package, Tag, Layers, MessageSquareDashed, Percent } from 'lucide-react';
+import { Plus, Search, Trash2, Edit2, Package, Tag, Layers, MessageSquareDashed, Percent, Info, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import ConfirmModal from './ConfirmModal';
 
@@ -20,6 +20,7 @@ export default function ProductsModule({ user, onRefreshStats }: ProductsModuleP
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingItem, setEditingItem] = useState<Product | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [detailProduct, setDetailProduct] = useState<Product | null>(null);
 
   // Form State
   const [name, setName] = useState('');
@@ -34,7 +35,18 @@ export default function ProductsModule({ user, onRefreshStats }: ProductsModuleP
     const list = getProducts(user.id);
     setProducts(list);
     onRefreshStats();
+    setDetailProduct(prev => {
+      if (!prev) return null;
+      return list.find(p => p.id === prev.id) || null;
+    });
   };
+
+  useEffect(() => {
+    window.addEventListener('db-update', handleRefresh);
+    return () => {
+      window.removeEventListener('db-update', handleRefresh);
+    };
+  }, []);
 
   const handleCreateOrUpdate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,10 +100,13 @@ export default function ProductsModule({ user, onRefreshStats }: ProductsModuleP
     setDeleteId(id);
   };
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.sku.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProducts = products.filter(p => {
+    const term = searchTerm.toLowerCase();
+    const nameMatch = (p.name || '').toLowerCase().includes(term);
+    const skuMatch = (p.sku || '').toLowerCase().includes(term);
+    const descMatch = (p.description || '').toLowerCase().includes(term);
+    return nameMatch || skuMatch || descMatch;
+  });
 
   const formatMoney = (val: number) => {
     return `${symbol} ${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -130,19 +145,43 @@ export default function ProductsModule({ user, onRefreshStats }: ProductsModuleP
       </div>
 
       {/* Search Bar */}
-      <div className="bg-slate-900/40 border border-slate-850 p-4 rounded-xl flex items-center gap-3">
-        <div className="relative flex-1">
-          <Search className={`absolute top-3 w-4 h-4 text-slate-400 ${isRtl ? 'left-3' : 'right-3'}`} />
-          <input
-            type="text"
-            placeholder={t.search}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-indigo-500 transition"
-          />
+      <div className="bg-slate-900/40 border border-slate-850 p-4 rounded-xl flex flex-col md:flex-row items-stretch md:items-center gap-3">
+        <div className="relative flex-1 flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className={`absolute top-3 w-4 h-4 text-indigo-400 ${isRtl ? 'right-3' : 'left-3'}`} />
+            <input
+              type="text"
+              placeholder={t.search}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className={`w-full bg-slate-950/80 border border-slate-800 rounded-xl py-2 text-xs text-white outline-none focus:border-indigo-500 transition ${isRtl ? 'pr-9 pl-12' : 'pl-9 pr-12'}`}
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className={`absolute top-2.5 text-[10px] text-rose-400 hover:text-rose-300 font-extrabold px-2 py-0.5 rounded hover:bg-rose-950/20 transition cursor-pointer ${isRtl ? 'left-2.5' : 'right-2.5'}`}
+              >
+                {isRtl ? 'صاف کریں' : 'CLEAR'}
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              // Highlight focusing
+              const searchInput = document.querySelector('input[type="text"]') as HTMLInputElement;
+              if (searchInput) searchInput.focus();
+            }}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer min-h-[36px]"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span>{isRtl ? 'تلاش کریں' : 'Search'}</span>
+          </button>
         </div>
-        <div className="bg-slate-950/40 text-[10px] text-slate-400 font-mono border border-slate-900 rounded-xl px-3.5 py-2">
-          Master Catalog Size: <strong>{filteredProducts.length} items</strong>
+        <div className="bg-slate-950/40 text-[10px] text-slate-400 font-mono border border-slate-900 rounded-xl px-3.5 py-2.5 flex justify-between items-center md:justify-start gap-2">
+          <span>{isRtl ? 'کل پروڈکٹس:' : 'Master Catalog Size:'}</span>
+          <strong className="text-white text-xs">{filteredProducts.length} {isRtl ? 'آئٹمز' : 'items'}</strong>
         </div>
       </div>
 
@@ -175,12 +214,16 @@ export default function ProductsModule({ user, onRefreshStats }: ProductsModuleP
                   const isLow = prod.stock <= prod.minStockAlert;
 
                   return (
-                    <tr key={prod.id} className="hover:bg-slate-800/20 transition">
+                    <tr 
+                      key={prod.id} 
+                      className="hover:bg-slate-800/40 transition cursor-pointer"
+                      onClick={() => setDetailProduct(prod)}
+                    >
                       <td className="px-5 py-4 font-mono font-semibold text-slate-400">{prod.sku}</td>
                       <td className="px-5 py-4 font-bold text-white max-w-xs">
                         <div>
-                          <p className="truncate" title={prod.name}>{prod.name}</p>
-                          <p className="text-[10px] text-indigo-400 font-mono mt-0.5" title="Product ID">ID: {prod.id}</p>
+                          <p className="truncate text-indigo-400 font-extrabold hover:underline" title={prod.name}>{prod.name}</p>
+                          <p className="text-[10px] text-slate-500 font-mono mt-0.5" title="Product ID">ID: {prod.id}</p>
                           <p className="text-[10px] text-slate-500 font-normal truncate mt-0.5" title={prod.description}>{prod.description || 'No description field'}</p>
                         </div>
                       </td>
@@ -208,14 +251,22 @@ export default function ProductsModule({ user, onRefreshStats }: ProductsModuleP
                       <td className="px-5 py-4 text-right whitespace-nowrap">
                         <div className="flex gap-1 justify-end">
                           <button
-                            onClick={() => handleStartEdit(prod)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStartEdit(prod);
+                            }}
                             className="p-1 px-2 hover:bg-indigo-500/10 hover:text-indigo-400 text-slate-400 rounded transition cursor-pointer"
+                            title="Edit Product"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => handleDelete(prod.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(prod.id);
+                            }}
                             className="p-1 px-2 hover:bg-rose-500/10 hover:text-rose-400 text-slate-400 rounded transition cursor-pointer"
+                            title="Delete Product"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -238,18 +289,22 @@ export default function ProductsModule({ user, onRefreshStats }: ProductsModuleP
               const isLow = prod.stock <= prod.minStockAlert;
               const profitPct = prod.price > 0 ? ((prod.price - prod.cost) / prod.price) * 100 : 0;
               return (
-                <div key={prod.id} className="p-4 bg-slate-950/20 flex flex-col gap-2">
+                <div 
+                  key={prod.id} 
+                  className="p-4 bg-slate-950/20 flex flex-col gap-2 cursor-pointer hover:bg-slate-800/20 transition duration-150"
+                  onClick={() => setDetailProduct(prod)}
+                >
                   <div className="flex justify-between items-start">
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[9px] font-mono text-slate-400 bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded">{prod.sku}</span>
                         <span className="text-[9px] font-mono text-indigo-400 bg-indigo-950/40 border border-indigo-900/40 px-1.5 py-0.5 rounded">ID: {prod.id}</span>
                       </div>
-                      <h4 className="font-extrabold text-white text-sm mt-1">{prod.name}</h4>
+                      <h4 className="font-extrabold text-white text-sm mt-1 hover:underline">{prod.name}</h4>
                     </div>
                     <div className="text-right">
                       <span className="font-bold text-slate-200 block text-xs">{formatMoney(prod.price)}</span>
-                      <span className="text-[10px] text-[emerald-400] font-black">{profitPct.toFixed(0)}% Margin</span>
+                      <span className="text-[10px] text-emerald-400 font-extrabold">{profitPct.toFixed(0)}% Margin</span>
                     </div>
                   </div>
 
@@ -263,16 +318,22 @@ export default function ProductsModule({ user, onRefreshStats }: ProductsModuleP
                     }`}>
                       In-Stock: {prod.stock} units
                     </span>
-                    <div className="flex gap-2">
+                    <div className="flex gap-3">
                       <button 
-                        onClick={() => handleStartEdit(prod)}
-                        className="text-indigo-400 font-bold hover:underline cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartEdit(prod);
+                        }}
+                        className="text-indigo-400 font-bold hover:underline cursor-pointer text-xs"
                       >
                         Edit
                       </button>
                       <button 
-                        onClick={() => handleDelete(prod.id)}
-                        className="text-rose-400 font-bold hover:underline cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(prod.id);
+                        }}
+                        className="text-rose-400 font-bold hover:underline cursor-pointer text-xs"
                       >
                         Delete
                       </button>
@@ -411,6 +472,170 @@ export default function ProductsModule({ user, onRefreshStats }: ProductsModuleP
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Product Details Modal */}
+      {detailProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setDetailProduct(null)} />
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-md w-full relative overflow-hidden text-xs text-slate-300 font-sans"
+          >
+            {/* Header / Accent Bar */}
+            <div className="bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-4 flex justify-between items-center text-white">
+              <div className="flex items-center gap-2">
+                <Info className="w-5 h-5 text-indigo-200" />
+                <h3 className="text-sm font-black uppercase tracking-wider">
+                  {isRtl ? 'پروڈکٹ کی تفصیلات' : 'Product Details'}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setDetailProduct(null)}
+                className="text-white/80 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Basic Header */}
+              <div className="space-y-1">
+                <p className="text-[10px] text-indigo-400 font-mono font-black uppercase tracking-wider">
+                  {isRtl ? 'آئٹم کا نام' : 'Item Name'}
+                </p>
+                <h2 className="text-lg font-black text-white leading-tight">
+                  {detailProduct.name}
+                </h2>
+              </div>
+
+              {/* Unique Identifiers */}
+              <div className="grid grid-cols-2 gap-3 bg-slate-950/50 p-3 rounded-xl border border-slate-850">
+                <div>
+                  <span className="text-[9px] text-slate-500 font-bold block uppercase tracking-wider">
+                    {isRtl ? 'پروڈکٹ آئی ڈی' : 'Product ID'}
+                  </span>
+                  <span className="font-mono text-xs font-black text-indigo-400">
+                    {detailProduct.id}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-slate-500 font-bold block uppercase tracking-wider">
+                    SKU / {isRtl ? 'ایس کے یو / بارکوڈ' : 'Barcode SKU'}
+                  </span>
+                  <span className="font-mono text-xs font-black text-slate-300">
+                    {detailProduct.sku || 'N/A'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Financial Ledger Highlights */}
+              <div className="space-y-2">
+                <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">
+                  {isRtl ? 'مالیاتی منافع کا مارجن' : 'Financial Ledger Margin'}
+                </span>
+                
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-900 flex flex-col justify-between">
+                    <span className="text-[9px] text-slate-500 font-bold uppercase">{isRtl ? 'قیمت خرید' : 'Cost Price'}</span>
+                    <span className="text-white font-mono font-black mt-1 text-xs">
+                      {formatMoney(detailProduct.cost)}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-900 flex flex-col justify-between">
+                    <span className="text-[9px] text-slate-500 font-bold uppercase">{isRtl ? 'قیمت فروخت' : 'Selling Price'}</span>
+                    <span className="text-indigo-300 font-mono font-black mt-1 text-xs">
+                      {formatMoney(detailProduct.price)}
+                    </span>
+                  </div>
+
+                  {(() => {
+                    const profit = detailProduct.price - detailProduct.cost;
+                    const marginValue = detailProduct.price > 0 ? (profit / detailProduct.price) * 100 : 0;
+                    const isProfit = profit >= 0;
+                    return (
+                      <div className={`p-2.5 rounded-xl border flex flex-col justify-between ${
+                        isProfit 
+                          ? 'bg-emerald-950/20 border-emerald-900/30 text-emerald-400' 
+                          : 'bg-rose-950/20 border-rose-900/30 text-rose-400'
+                      }`}>
+                        <span className="text-[9px] text-slate-500 font-bold uppercase">{isRtl ? 'خالص مارجن' : 'Net Margin'}</span>
+                        <div className="mt-1 font-mono">
+                          <span className="font-black block leading-none">{formatMoney(profit)}</span>
+                          <span className="text-[9px] font-bold block mt-0.5">{marginValue.toFixed(0)}%</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Stock Diagnostics */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-950/40 border border-slate-900 p-3 rounded-xl flex items-center justify-between">
+                  <div>
+                    <span className="text-[9px] text-slate-500 font-bold block uppercase">{isRtl ? 'دستیاب اسٹاک' : 'Stock In-Hand'}</span>
+                    <span className="text-white text-sm font-black font-mono">
+                      {detailProduct.stock} <span className="text-[10px] text-slate-400 font-normal">{isRtl ? 'یونٹس' : 'Units'}</span>
+                    </span>
+                  </div>
+                  {detailProduct.stock <= detailProduct.minStockAlert ? (
+                    <span className="px-1.5 py-0.5 bg-orange-950/80 border border-orange-500/30 rounded text-[9px] text-orange-400 font-extrabold animate-pulse">
+                      {isRtl ? 'اسٹاک کم ہے' : 'LOW STOCK'}
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 bg-emerald-950/50 border border-emerald-850 rounded text-[9px] text-emerald-400 font-extrabold">
+                      {isRtl ? 'محفوظ' : 'HEALTHY'}
+                    </span>
+                  )}
+                </div>
+
+                <div className="bg-slate-950/40 border border-slate-900 p-3 rounded-xl">
+                  <span className="text-[9px] text-slate-500 font-bold block uppercase">{isRtl ? 'انتباہ کی حد' : 'Alert Threshold'}</span>
+                  <span className="text-slate-300 text-sm font-black font-mono">
+                    {detailProduct.minStockAlert} <span className="text-[10px] text-slate-400 font-normal">{isRtl ? 'یونٹس' : 'Units'}</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1">
+                <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">
+                  {isRtl ? 'تفصیل' : 'Description'}
+                </span>
+                <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-850 min-h-[60px] text-slate-300 text-xs whitespace-pre-wrap leading-relaxed">
+                  {detailProduct.description || (isRtl ? 'کوئی تفصیل درج نہیں ہے۔' : 'No description provided or logged for this product catalog line.')}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2.5 justify-end pt-2 border-t border-slate-800/60">
+                <button
+                  type="button"
+                  onClick={() => setDetailProduct(null)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-755 rounded-xl text-slate-300 font-bold transition cursor-pointer text-xs"
+                >
+                  {isRtl ? 'بند کریں' : 'Close'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prod = detailProduct;
+                    setDetailProduct(null);
+                    handleStartEdit(prod);
+                  }}
+                  className="px-5 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white rounded-xl font-extrabold hover:shadow-lg transition cursor-pointer text-xs flex items-center gap-1.5"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>{isRtl ? 'تبدیل کریں / ایڈٹ' : 'Edit Product'}</span>
+                </button>
+              </div>
+            </div>
           </motion.div>
         </div>
       )}

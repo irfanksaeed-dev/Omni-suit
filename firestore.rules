@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net (Default Deny All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Authentication and Identity Utilities
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'admin@business.com' || 
+        request.auth.token.email == 'irfanksaeed@gmail.com' || 
+        request.auth.token.email == 'demo@business.com'
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Multi-tenant Segmented Rules
+
+    match /tenants/{tenantId} {
+      allow read, write: if isOwner(tenantId) || isAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow read, create, update, delete: if isSignedIn() && (
+        (request.resource != null && incoming().tenantId == request.auth.uid) || 
+        (resource != null && existing().tenantId == request.auth.uid) || 
+        isAdmin()
+      );
+    }
+
+    match /products/{productId} {
+      allow read, create, update, delete: if isSignedIn() && (
+        (request.resource != null && incoming().tenantId == request.auth.uid) || 
+        (resource != null && existing().tenantId == request.auth.uid) || 
+        isAdmin()
+      );
+    }
+
+    match /invoices/{invoiceId} {
+      allow read, create, update, delete: if isSignedIn() && (
+        (request.resource != null && incoming().tenantId == request.auth.uid) || 
+        (resource != null && existing().tenantId == request.auth.uid) || 
+        isAdmin()
+      );
+    }
+
+    match /sales/{saleId} {
+      allow read, create, update, delete: if isSignedIn() && (
+        (request.resource != null && incoming().tenantId == request.auth.uid) || 
+        (resource != null && existing().tenantId == request.auth.uid) || 
+        isAdmin()
+      );
+    }
+
+    match /expenses/{expenseId} {
+      allow read, create, update, delete: if isSignedIn() && (
+        (request.resource != null && incoming().tenantId == request.auth.uid) || 
+        (resource != null && existing().tenantId == request.auth.uid) || 
+        isAdmin()
+      );
+    }
+
+    match /accessLogs/{logId} {
+      allow read, create, update, delete: if isSignedIn() && (
+        (request.resource != null && incoming().targetId == request.auth.uid) || 
+        (resource != null && existing().targetId == request.auth.uid) || 
+        isAdmin()
+      );
+    }
+
+    match /supportChats/{chatId} {
+      allow read, create, update, delete: if isSignedIn() && (
+        (request.resource != null && (incoming().senderEmail == request.auth.token.email || incoming().receiverEmail == request.auth.token.email)) || 
+        (resource != null && (existing().senderEmail == request.auth.token.email || existing().receiverEmail == request.auth.token.email)) || 
+        isAdmin()
+      );
+    }
+
+    match /activeSessions/{sessionId} {
+      allow read, create, update, delete: if isSignedIn() && (
+        (request.resource != null && incoming().userId == request.auth.uid) || 
+        (resource != null && existing().userId == request.auth.uid) || 
+        isAdmin()
+      );
+    }
+
+    match /app_state/{key} {
+      allow read, write: if true;
+    }
+  }
+}
