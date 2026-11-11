@@ -1,4 +1,4 @@
-import { UserTenant, Customer, Product, Invoice, Sale, Expense, DashboardStats, AccessLog, ChatMessage, ActiveSession, PurchaseRecord, CustomerPayment, CustomerReturn } from './types';
+import { UserTenant, Customer, Product, Invoice, Sale, Expense, DashboardStats, AccessLog, ChatMessage, ActiveSession, PurchaseRecord, CustomerPayment, CustomerReturn, CustomInvite } from './types';
 
 // Multi-tenant Local Database Engine
 const KEYS = {
@@ -15,6 +15,7 @@ const KEYS = {
   PURCHASES: 'biz_suite_purchases',
   CUSTOMER_PAYMENTS: 'biz_suite_customer_payments',
   CUSTOMER_RETURNS: 'biz_suite_customer_returns',
+  CUSTOM_INVITES: 'biz_suite_custom_invites',
 };
 
 // Seed initial Demo Tenant if nothing exists
@@ -82,36 +83,7 @@ export function initializeDatabase() {
     localStorage.setItem(KEYS.TENANTS, JSON.stringify(tenants));
   }
 
-  // One-time bulk auto-approvals migration:
-  // Auto-approve existing unapproved accounts so friends don't get stuck in pending verification.
-  let tenantsChanged = false;
-  const updatedTenants = tenants.map(t => {
-    if (t.isApproved === false) {
-      tenantsChanged = true;
-      return { ...t, isApproved: true };
-    }
-    return t;
-  });
-  if (tenantsChanged) {
-    localStorage.setItem(KEYS.TENANTS, JSON.stringify(updatedTenants));
-  }
-
-  const customersList = getCustomersGlobal();
-  let customersChanged = false;
-  const updatedCustomers = customersList.map(c => {
-    if (c.isApproved === false) {
-      customersChanged = true;
-      return { ...c, isApproved: true };
-    }
-    return c;
-  });
-  if (customersChanged) {
-    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(updatedCustomers));
-  }
-
-  if (tenantsChanged || customersChanged) {
-    triggerServerSync();
-  }
+  // Preserve approval flags so Super Admin maintains full review authority over all registrations
 }
 
 function getStorageArray<T>(key: string): T[] {
@@ -150,7 +122,8 @@ export async function pushServerSync(): Promise<void> {
       'biz_suite_access_logs',
       'biz_suite_support_chats',
       'biz_suite_active_sessions',
-      'biz_suite_purchases'
+      'biz_suite_purchases',
+      'biz_suite_custom_invites'
     ];
     SYNC_KEYS.forEach(key => {
       const val = localStorage.getItem(key);
@@ -209,13 +182,47 @@ export async function pullServerSync(): Promise<void> {
         'biz_suite_access_logs',
         'biz_suite_support_chats',
         'biz_suite_active_sessions',
-        'biz_suite_purchases'
+        'biz_suite_purchases',
+        'biz_suite_custom_invites'
       ];
+      let hasNewLocalRecords = false;
       SYNC_KEYS.forEach(key => {
-        if (cloudDb && cloudDb[key] !== undefined) {
-          localStorage.setItem(key, JSON.stringify(cloudDb[key]));
+        if (cloudDb && Array.isArray(cloudDb[key])) {
+          const cloudArr = cloudDb[key];
+          const localStr = localStorage.getItem(key);
+          if (localStr) {
+            try {
+              const localArr = JSON.parse(localStr);
+              if (Array.isArray(localArr) && localArr.length > 0) {
+                const map = new Map<string, any>();
+                // Cloud items first
+                cloudArr.forEach((item: any) => {
+                  if (item) {
+                    const id = item.id || (item.userId ? `${item.userId}-${item.email}` : null);
+                    if (id) map.set(id, item);
+                  }
+                });
+                // Local items merged if missing in cloud
+                localArr.forEach((item: any) => {
+                  if (item) {
+                    const id = item.id || (item.userId ? `${item.userId}-${item.email}` : null);
+                    if (id && !map.has(id)) {
+                      map.set(id, item);
+                      hasNewLocalRecords = true;
+                    }
+                  }
+                });
+                localStorage.setItem(key, JSON.stringify(Array.from(map.values())));
+                return;
+              }
+            } catch (e) {}
+          }
+          localStorage.setItem(key, JSON.stringify(cloudArr));
         }
       });
+      if (hasNewLocalRecords) {
+        pushServerSync().catch(() => {});
+      }
       notifyDbUpdate();
     } else {
       console.warn('Cloud database pull responded with non-ok status code:', res.status);
@@ -225,9 +232,16 @@ export async function pullServerSync(): Promise<void> {
   }
 }
 
+let notifyDbUpdateTimer: any = null;
 export function notifyDbUpdate(): void {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('db-update'));
+    if (notifyDbUpdateTimer) {
+      clearTimeout(notifyDbUpdateTimer);
+    }
+    notifyDbUpdateTimer = setTimeout(() => {
+      notifyDbUpdateTimer = null;
+      window.dispatchEvent(new CustomEvent('db-update'));
+    }, 0);
   }
 }
 
@@ -322,36 +336,50 @@ export function adminToggleCustomerApprovalGlobal(customerId: string): boolean {
   return false;
 }
 
-// User Registrations
+// User Registrations & Approval Policies
+export function getRequireAdminApprovalSetting(): boolean {
+  const saved = localStorage.getItem('biz_suite_require_admin_approval');
+  if (saved === null) return true; // Default: Require Super Admin Approval for all permanent accounts
+  return saved === 'true';
+}
+
+export function setRequireAdminApprovalSetting(required: boolean): void {
+  localStorage.setItem('biz_suite_require_admin_approval', String(required));
+  triggerServerSync();
+}
+
 export function getTenants(): UserTenant[] {
   return getStorageArray<UserTenant>(KEYS.TENANTS);
 }
 
-export function registerTenant(tenant: UserTenant): boolean {
+export function registerTenant(tenant: UserTenant, bypassApproval: boolean = false): { success: boolean; requiresApproval: boolean; error?: string; createdTenant?: UserTenant } {
   const tenants = getTenants();
   if (tenants.some(t => t.email.toLowerCase() === tenant.email.toLowerCase())) {
-    return false; // Email exists
+    return { success: false, requiresApproval: false, error: 'Email already registered' };
   }
   
   const isSpecialAdmin = tenant.email.toLowerCase() === 'admin@business.com' || 
                          tenant.email.toLowerCase() === 'irfanksaeed@gmail.com' ||
                          tenant.email.toLowerCase() === 'demo@business.com';
                          
+  // Strict Security Policy: All new registrations MUST be approved by Super Admin unless registered via a pre-approved custom invite token
+  const requiresApproval = !bypassApproval && !isSpecialAdmin;
+
   const preparedTenant: UserTenant = {
     ...tenant,
-    role: isSpecialAdmin ? 'admin' : 'user',
-    isActive: true,
-    isApproved: true, // Auto-approve all registrations for smooth demo setups
-    subscriptionStatus: 'active',
-    subscriptionExpiry: '2027-05-22', // Default 1 year subscription
-    createdAt: new Date().toISOString().split('T')[0]
+    role: isSpecialAdmin ? 'admin' : (tenant.role || 'user'),
+    isActive: tenant.isActive !== false,
+    isApproved: bypassApproval ? true : (isSpecialAdmin ? true : false),
+    subscriptionStatus: tenant.subscriptionStatus || 'active',
+    subscriptionExpiry: tenant.subscriptionExpiry !== undefined ? tenant.subscriptionExpiry : '2027-12-31', // Default 1 year subscription if not specified
+    createdAt: tenant.createdAt || new Date().toISOString().split('T')[0]
   };
 
   tenants.push(preparedTenant);
   setStorageArray(KEYS.TENANTS, tenants);
+  triggerServerSync();
   
-  // Custom merchants now start with a clean sheet, so data does not mix or preload for them!
-  return true;
+  return { success: true, requiresApproval: !preparedTenant.isApproved, createdTenant: preparedTenant };
 }
 
 export function adminUpdateTenant(updated: UserTenant): void {
@@ -366,6 +394,7 @@ export function adminUpdateTenant(updated: UserTenant): void {
     if (active && active.id === updated.id) {
       setActiveUser(updated);
     }
+    triggerServerSync();
   }
 }
 
@@ -387,6 +416,7 @@ export function adminDeleteTenant(tenantId: string): void {
   purgeSegregated(KEYS.INVOICES);
   purgeSegregated(KEYS.SALES);
   purgeSegregated(KEYS.EXPENSES);
+  triggerServerSync();
 }
 
 // Admin custom manual registration helper
@@ -397,8 +427,79 @@ export function adminCreateTenant(tenant: UserTenant): boolean {
   }
   tenants.push(tenant);
   setStorageArray(KEYS.TENANTS, tenants);
+  triggerServerSync();
   
   return true;
+}
+
+export function getPendingUsersCount(): number {
+  const tenants = getTenants();
+  return tenants.filter(t => t.isApproved === false).length;
+}
+
+export function adminToggleTenantApproval(tenantId: string): boolean {
+  const tenants = getTenants();
+  const idx = tenants.findIndex(t => t.id === tenantId);
+  if (idx !== -1) {
+    const current = tenants[idx];
+    const newStatus = !current.isApproved;
+    tenants[idx] = {
+      ...current,
+      isApproved: newStatus,
+      isActive: newStatus ? true : current.isActive
+    };
+    setStorageArray(KEYS.TENANTS, tenants);
+    triggerServerSync();
+    return true;
+  }
+  return false;
+}
+
+export function adminToggleTenantBlock(tenantId: string): boolean {
+  const tenants = getTenants();
+  const idx = tenants.findIndex(t => t.id === tenantId);
+  if (idx !== -1) {
+    const current = tenants[idx];
+    tenants[idx] = {
+      ...current,
+      isActive: current.isActive === false ? true : false
+    };
+    setStorageArray(KEYS.TENANTS, tenants);
+    triggerServerSync();
+    return true;
+  }
+  return false;
+}
+
+export function adminToggleTenantRole(tenantId: string): boolean {
+  const tenants = getTenants();
+  const idx = tenants.findIndex(t => t.id === tenantId);
+  if (idx !== -1) {
+    const current = tenants[idx];
+    tenants[idx] = {
+      ...current,
+      role: current.role === 'admin' ? 'user' : 'admin'
+    };
+    setStorageArray(KEYS.TENANTS, tenants);
+    triggerServerSync();
+    return true;
+  }
+  return false;
+}
+
+export function adminResetTenantPassword(tenantId: string, newPasswordSha: string): boolean {
+  const tenants = getTenants();
+  const idx = tenants.findIndex(t => t.id === tenantId);
+  if (idx !== -1) {
+    tenants[idx] = {
+      ...tenants[idx],
+      passwordSha: newPasswordSha
+    };
+    setStorageArray(KEYS.TENANTS, tenants);
+    triggerServerSync();
+    return true;
+  }
+  return false;
 }
 
 export function getActiveUser(): UserTenant | null {
@@ -449,7 +550,481 @@ export function updateTenantSettings(updated: Partial<UserTenant>): UserTenant |
   return merged;
 }
 
-// Data Isolation: Helper to fetch data strictly matching active user
+// ==========================================
+// 24-HOUR GUEST VISITOR PASS OPERATIONS
+// ==========================================
+export function provisionGuestPassTenant(passCode?: string): UserTenant {
+  const tenants = getTenants();
+  
+  // If active user is already an unexpired guest tenant, reuse and ensure demo data
+  const active = getActiveUser();
+  if (!passCode && active && active.isGuestPass) {
+    if (!isGuestPassExpired(active)) {
+      const custs = getCustomers(active.id);
+      if (custs.length === 0) {
+        seedDemoDataForTenant(active.id);
+      }
+      return active;
+    }
+  }
+
+  const cleanPass = passCode ? passCode.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+  const guestPassId = cleanPass ? `tenant-guest-${cleanPass}` : `tenant-guest-${Date.now().toString(36)}`;
+  
+  // Check if this guest tenant already exists in database
+  const existing = tenants.find(t => t.id === guestPassId || (cleanPass && t.id === `tenant-guest-${cleanPass}`));
+  if (existing) {
+    const isExp = existing.guestExpiresAt && new Date(existing.guestExpiresAt).getTime() < Date.now();
+    if (isExp) {
+      existing.guestExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      existing.isActive = true;
+      existing.isApproved = true;
+      existing.subscriptionStatus = 'active';
+      existing.subscriptionExpiry = existing.guestExpiresAt;
+      adminUpdateTenant(existing);
+    }
+    const custs = getCustomers(existing.id);
+    if (custs.length === 0) {
+      seedDemoDataForTenant(existing.id);
+    }
+    return existing;
+  }
+
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24-hour expiration
+  const newGuest: UserTenant = {
+    id: guestPassId,
+    email: `guest-${Math.random().toString(36).substring(2, 7)}@omnisuite.app`,
+    passwordSha: 'guest123',
+    companyName: 'Guest Explorer (24h Pass)',
+    currency: 'USD',
+    language: 'en',
+    taxRate: 5,
+    invoicePrefix: 'GST-',
+    invoiceNotes: '24-Hour Interactive Evaluation Sandbox Pass.',
+    role: 'user',
+    isActive: true,
+    isApproved: true,
+    isGuestPass: true,
+    guestExpiresAt: expiresAt,
+    subscriptionStatus: 'active',
+    subscriptionExpiry: expiresAt,
+    createdAt: new Date().toISOString()
+  };
+
+  tenants.push(newGuest);
+  setStorageArray(KEYS.TENANTS, tenants);
+  
+  // Seed sample products, sales, customers, and invoices for the guest visitor
+  seedDemoDataForTenant(guestPassId);
+  triggerServerSync();
+  return newGuest;
+}
+
+export function isGuestPassExpired(user: UserTenant): boolean {
+  if (!user.isGuestPass || !user.guestExpiresAt) return false;
+  return new Date(user.guestExpiresAt).getTime() <= Date.now();
+}
+
+export function getGuestPassRemainingHours(user: UserTenant): { hours: number; minutes: number; isExpired: boolean } {
+  if (!user.isGuestPass || !user.guestExpiresAt) return { hours: 24, minutes: 0, isExpired: false };
+  const diffMs = new Date(user.guestExpiresAt).getTime() - Date.now();
+  if (diffMs <= 0) {
+    return { hours: 0, minutes: 0, isExpired: true };
+  }
+  const totalMinutes = Math.floor(diffMs / (60 * 1000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return { hours, minutes, isExpired: false };
+}
+
+export function requestGuestUpgradeToPermanent(
+  tenantId: string, 
+  details: { companyName: string; email: string; phone?: string; notes?: string; password?: string }
+): { success: boolean; message: string; updatedUser?: UserTenant } {
+  const tenants = getTenants();
+  const tenant = tenants.find(t => t.id === tenantId);
+  if (!tenant) {
+    return { success: false, message: 'Guest account not found.' };
+  }
+
+  // Check if email is already taken by another permanent tenant
+  if (details.email && details.email.toLowerCase() !== tenant.email.toLowerCase()) {
+    const emailExists = tenants.some(t => t.id !== tenantId && t.email.toLowerCase() === details.email.toLowerCase());
+    if (emailExists) {
+      return { success: false, message: 'This email address is already in use by another account.' };
+    }
+  }
+
+  tenant.companyName = details.companyName.trim() || tenant.companyName;
+  if (details.email && details.email.trim()) tenant.email = details.email.trim().toLowerCase();
+  if (details.phone) tenant.phone = details.phone.trim();
+  if (details.password) tenant.passwordSha = details.password;
+  tenant.guestUpgradeRequested = true;
+  tenant.guestUpgradeRequestedAt = new Date().toISOString();
+  tenant.guestUpgradeNotes = details.notes || 'User requested permanent account conversion from 24-hour trial.';
+
+  setStorageArray(KEYS.TENANTS, tenants);
+  logAccess('merchant', tenant.id, tenant.companyName, tenant.email, `Submitted request for Permanent Account Conversion to Super Admin (Phone: ${details.phone || 'N/A'})`);
+  triggerServerSync();
+
+  return { success: true, message: 'Request submitted successfully to Super Admin Irfan Saeed.', updatedUser: tenant };
+}
+
+export function grantGuestPermanentAccess(tenantId: string, customData?: Partial<UserTenant>): UserTenant | null {
+  const tenants = getTenants();
+  const idx = tenants.findIndex(t => t.id === tenantId);
+  if (idx === -1) return null;
+
+  const current = tenants[idx];
+  const updated: UserTenant = {
+    ...current,
+    ...(customData || {}),
+    isGuestPass: false,
+    guestExpiresAt: undefined,
+    guestUpgradeRequested: false,
+    isApproved: true,
+    isActive: true,
+    subscriptionStatus: 'active',
+    subscriptionExpiry: '2027-12-31',
+    role: current.role || 'user'
+  };
+
+  tenants[idx] = updated;
+  setStorageArray(KEYS.TENANTS, tenants);
+  logAccess('merchant', updated.id, updated.companyName, updated.email, 'Super Admin GRANTED Permanent Account Access to guest visitor');
+  triggerServerSync();
+
+  return updated;
+}
+
+export function dismissGuestUpgradeRequest(tenantId: string): void {
+  const tenants = getTenants();
+  const tenant = tenants.find(t => t.id === tenantId);
+  if (tenant) {
+    tenant.guestUpgradeRequested = false;
+    setStorageArray(KEYS.TENANTS, tenants);
+    triggerServerSync();
+  }
+}
+
+// ==========================================
+// CUSTOM DIRECT INVITES & PROVISIONING TOKENS
+// ==========================================
+export function getCustomInvites(): CustomInvite[] {
+  const list = getStorageArray<CustomInvite>(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites');
+  // Auto-mark expired tokens
+  const now = Date.now();
+  let changed = false;
+  const updated = list.map(inv => {
+    if (inv.status === 'active' && !inv.isPermanent && inv.expiresAt && new Date(inv.expiresAt).getTime() < now) {
+      changed = true;
+      return { ...inv, status: 'expired' as const };
+    }
+    return inv;
+  });
+  if (changed) {
+    setStorageArray(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites', updated);
+  }
+  return updated;
+}
+
+export function createCustomInvite(data: {
+  email: string;
+  companyName?: string;
+  phone?: string;
+  durationType: string; // '24h' | '3d' | '7d' | '15d' | '30d' | '90d' | '180d' | '365d' | 'custom' | 'permanent'
+  customDate?: string;
+  allowedHoursStart?: string;
+  allowedHoursEnd?: string;
+}): CustomInvite {
+  const list = getStorageArray<CustomInvite>(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites');
+  const tokenId = 'inv-' + Math.random().toString(36).substring(2, 9);
+  const now = Date.now();
+  
+  let expiresAt: string | undefined = undefined;
+  let durationLabel = 'Permanent / Lifetime';
+  let isPermanent = false;
+
+  switch (data.durationType) {
+    case '24h':
+      expiresAt = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+      durationLabel = '24 Hours Pass (1 Day)';
+      break;
+    case '3d':
+      expiresAt = new Date(now + 3 * 24 * 60 * 60 * 1000).toISOString();
+      durationLabel = '3 Days Pass';
+      break;
+    case '7d':
+      expiresAt = new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString();
+      durationLabel = '7 Days License (1 Week)';
+      break;
+    case '15d':
+      expiresAt = new Date(now + 15 * 24 * 60 * 60 * 1000).toISOString();
+      durationLabel = '15 Days License';
+      break;
+    case '30d':
+      expiresAt = new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString();
+      durationLabel = '30 Days (1 Month)';
+      break;
+    case '90d':
+      expiresAt = new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString();
+      durationLabel = '90 Days (3 Months)';
+      break;
+    case '180d':
+      expiresAt = new Date(now + 180 * 24 * 60 * 60 * 1000).toISOString();
+      durationLabel = '180 Days (6 Months)';
+      break;
+    case '365d':
+      expiresAt = new Date(now + 365 * 24 * 60 * 60 * 1000).toISOString();
+      durationLabel = '1 Year License';
+      break;
+    case 'custom':
+      if (data.customDate) {
+        expiresAt = new Date(data.customDate + 'T23:59:59').toISOString();
+        durationLabel = `Until ${data.customDate}`;
+      } else {
+        expiresAt = new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString();
+        durationLabel = '30 Days (1 Month)';
+      }
+      break;
+    case 'permanent':
+    default:
+      isPermanent = true;
+      expiresAt = undefined;
+      durationLabel = 'Permanent / Lifetime Access';
+      break;
+  }
+
+  const newInvite: CustomInvite = {
+    id: tokenId,
+    email: data.email.trim().toLowerCase(),
+    companyName: data.companyName?.trim() || undefined,
+    phone: data.phone?.trim() || undefined,
+    durationLabel,
+    expiresAt,
+    allowedHoursStart: data.allowedHoursStart?.trim() || undefined,
+    allowedHoursEnd: data.allowedHoursEnd?.trim() || undefined,
+    isPermanent,
+    createdAt: new Date().toISOString(),
+    createdBy: 'Super Admin',
+    status: 'active'
+  };
+
+  list.unshift(newInvite);
+  setStorageArray(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites', list);
+  logAccess('merchant', tokenId, data.companyName || 'New Business', data.email, `Super Admin generated custom invite link with ${durationLabel}`);
+  triggerServerSync();
+
+  return newInvite;
+}
+
+export function getCustomInviteByToken(tokenId: string): CustomInvite | null {
+  const clean = tokenId.trim().toLowerCase().replace(/^[\s#?\/]+/, '');
+  const list = getStorageArray<CustomInvite>(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites');
+  return list.find(inv => inv.id.toLowerCase() === clean) || null;
+}
+
+export function claimCustomInvite(tokenId: string, tenantId: string): boolean {
+  const list = getStorageArray<CustomInvite>(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites');
+  const idx = list.findIndex(inv => inv.id.toLowerCase() === tokenId.toLowerCase());
+  if (idx !== -1) {
+    list[idx].status = 'used';
+    list[idx].usedAt = new Date().toISOString();
+    list[idx].usedByTenantId = tenantId;
+    setStorageArray(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites', list);
+    triggerServerSync();
+    return true;
+  }
+  return false;
+}
+
+export function revokeCustomInvite(tokenId: string): boolean {
+  const list = getStorageArray<CustomInvite>(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites');
+  const idx = list.findIndex(inv => inv.id.toLowerCase() === tokenId.toLowerCase());
+  if (idx !== -1) {
+    list[idx].status = 'revoked';
+    setStorageArray(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites', list);
+    triggerServerSync();
+    return true;
+  }
+  return false;
+}
+
+export function deleteCustomInvite(tokenId: string): void {
+  const list = getStorageArray<CustomInvite>(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites');
+  const filtered = list.filter(inv => inv.id.toLowerCase() !== tokenId.toLowerCase());
+  setStorageArray(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites', filtered);
+  triggerServerSync();
+}
+
+export function clearInactiveCustomInvites(): number {
+  const list = getStorageArray<CustomInvite>(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites');
+  const activeOnly = list.filter(inv => inv.status === 'active');
+  const deletedCount = list.length - activeOnly.length;
+  setStorageArray(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites', activeOnly);
+  triggerServerSync();
+  return deletedCount;
+}
+
+export function updateCustomInvite(tokenId: string, updates: Partial<CustomInvite>): CustomInvite | null {
+  const list = getStorageArray<CustomInvite>(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites');
+  const idx = list.findIndex(inv => inv.id.toLowerCase() === tokenId.toLowerCase());
+  if (idx !== -1) {
+    list[idx] = { ...list[idx], ...updates };
+    setStorageArray(KEYS.CUSTOM_INVITES || 'biz_suite_custom_invites', list);
+    triggerServerSync();
+    return list[idx];
+  }
+  return null;
+}
+
+// ==========================================
+// TENANT TIME & DURATION CONTROL BY SUPER ADMIN
+// ==========================================
+export function adminUpdateTenantAccessTime(
+  tenantId: string, 
+  options: {
+    subscriptionExpiry?: string;
+    isPermanent?: boolean;
+    allowedHoursStart?: string;
+    allowedHoursEnd?: string;
+    tempSuspendedUntil?: string;
+    isActive?: boolean;
+    subscriptionStatus?: 'active' | 'inactive' | 'expired';
+  }
+): UserTenant | null {
+  const tenants = getTenants();
+  const idx = tenants.findIndex(t => t.id === tenantId);
+  if (idx === -1) return null;
+
+  const current = tenants[idx];
+  const updated: UserTenant = {
+    ...current,
+    ...options,
+    subscriptionExpiry: options.isPermanent ? undefined : (options.subscriptionExpiry !== undefined ? options.subscriptionExpiry : current.subscriptionExpiry),
+    subscriptionStatus: options.subscriptionStatus || (options.isPermanent || !options.subscriptionExpiry || new Date(options.subscriptionExpiry).getTime() >= Date.now() ? 'active' : 'expired'),
+    allowedHoursStart: options.allowedHoursStart !== undefined ? options.allowedHoursStart : current.allowedHoursStart,
+    allowedHoursEnd: options.allowedHoursEnd !== undefined ? options.allowedHoursEnd : current.allowedHoursEnd,
+    tempSuspendedUntil: options.tempSuspendedUntil !== undefined ? options.tempSuspendedUntil : current.tempSuspendedUntil,
+    isActive: options.isActive !== undefined ? options.isActive : current.isActive
+  };
+
+  // If this was a guest pass and was extended/made permanent, unflag guestPass if permanent
+  if (options.isPermanent) {
+    updated.isGuestPass = false;
+    updated.guestExpiresAt = undefined;
+    updated.guestUpgradeRequested = false;
+  }
+
+  tenants[idx] = updated;
+  setStorageArray(KEYS.TENANTS, tenants);
+  
+  // If active user is this tenant, sync active user session
+  const activeUser = getActiveUser();
+  if (activeUser && activeUser.id === tenantId) {
+    setActiveUser(updated);
+  }
+
+  logAccess('merchant', updated.id, updated.companyName, updated.email, `Super Admin updated access time limits: Expiry=${updated.subscriptionExpiry || 'Permanent'}, Hours=${updated.allowedHoursStart || '00:00'}-${updated.allowedHoursEnd || '23:59'}`);
+  triggerServerSync();
+
+  return updated;
+}
+
+export function adminExtendTenantSubscription(
+  tenantId: string,
+  extension: '24h' | '7d' | '30d' | '90d' | '180d' | '365d' | 'permanent' | string
+): UserTenant | null {
+  const tenants = getTenants();
+  const tenant = tenants.find(t => t.id === tenantId);
+  if (!tenant) return null;
+
+  const now = Date.now();
+  // Calculate base from current expiry if still in future, or from now
+  const baseTime = (tenant.subscriptionExpiry && new Date(tenant.subscriptionExpiry).getTime() > now)
+    ? new Date(tenant.subscriptionExpiry).getTime()
+    : now;
+
+  let newExpiry: string | undefined = undefined;
+  let isPermanent = false;
+
+  switch (extension) {
+    case '24h':
+      newExpiry = new Date(baseTime + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      break;
+    case '7d':
+      newExpiry = new Date(baseTime + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      break;
+    case '30d':
+      newExpiry = new Date(baseTime + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      break;
+    case '90d':
+      newExpiry = new Date(baseTime + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      break;
+    case '180d':
+      newExpiry = new Date(baseTime + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      break;
+    case '365d':
+      newExpiry = new Date(baseTime + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      break;
+    case 'permanent':
+      isPermanent = true;
+      newExpiry = undefined;
+      break;
+    default:
+      // If it's a date string like '2026-12-31'
+      newExpiry = extension;
+      break;
+  }
+
+  return adminUpdateTenantAccessTime(tenantId, {
+    subscriptionExpiry: newExpiry,
+    isPermanent,
+    subscriptionStatus: 'active',
+    isActive: true
+  });
+}
+
+export function isTenantAccessExpired(tenant: UserTenant): boolean {
+  if (tenant.role === 'admin') return false; // Super Admins never expire
+  
+  // 1. Guest pass expiration
+  if (tenant.isGuestPass && tenant.guestExpiresAt) {
+    if (new Date(tenant.guestExpiresAt).getTime() <= Date.now()) {
+      return true;
+    }
+  }
+
+  // 2. Explicit expired status
+  if (tenant.subscriptionStatus === 'expired') {
+    return true;
+  }
+
+  // 3. Subscription Expiry date check
+  if (tenant.subscriptionExpiry) {
+    // If format is YYYY-MM-DD, check end of that day (23:59:59)
+    const expDate = tenant.subscriptionExpiry.includes('T') 
+      ? new Date(tenant.subscriptionExpiry).getTime()
+      : new Date(tenant.subscriptionExpiry + 'T23:59:59').getTime();
+    
+    if (expDate <= Date.now()) {
+      return true;
+    }
+  }
+
+  // 4. Temporary suspension check
+  if (tenant.tempSuspendedUntil) {
+    const suspendEnd = tenant.tempSuspendedUntil.includes('T')
+      ? new Date(tenant.tempSuspendedUntil).getTime()
+      : new Date(tenant.tempSuspendedUntil + 'T23:59:59').getTime();
+    if (suspendEnd > Date.now()) {
+      return true; // temporarily suspended
+    }
+  }
+
+  return false;
+}
+
 function getTenantData<T extends { tenantId: string }>(key: string, tenantId: string): T[] {
   const all = getStorageArray<T>(key);
   return all.filter(item => item.tenantId === tenantId);
@@ -645,8 +1220,8 @@ export function addSale(tenantId: string, data: Omit<Sale, 'id' | 'tenantId' | '
   saveTenantData(KEYS.SALES, tenantId, newItem, true);
   logTenantAction(tenantId, `Registered sale transaction: ${newItem.description} (Amount: ${newItem.amount})`);
 
-  // If this sale carries an invoiceId, automatically resolve and mark the corresponding Invoice as paid!
-  if (newItem.invoiceId) {
+  // If this sale carries an invoiceId, automatically resolve and mark the corresponding Invoice as paid unless it is credit/udhaar!
+  if (newItem.invoiceId && newItem.paymentMethod !== 'credit' && !newItem.isCredit) {
     const invoices = getInvoices(tenantId);
     const linkedInvoice = invoices.find(inv => inv.id === newItem.invoiceId);
     if (linkedInvoice && linkedInvoice.status !== 'paid') {

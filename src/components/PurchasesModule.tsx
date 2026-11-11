@@ -109,9 +109,15 @@ export default function PurchasesModule({ user, onRefreshStats }: PurchasesModul
         <div>
           <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
             <ShoppingCart className="w-5 h-5 text-indigo-400" />
-            Purchase Records
+            {t.purchases || 'Purchase Records'}
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">Record business inventory purchases from suppliers, track costs, and auto-increment stock levels.</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {user.language === 'ur' ? 'سپلائرز سے مال کی خریداری درج کریں، لاگت اور اسٹاک کا خودکار ریکارڈ رکھیں۔' :
+             user.language === 'ar' ? 'تسجيل مشتريات المخزون من الموردين وتتبع التكاليف وزيادة المخزون تلقائياً.' :
+             user.language === 'bn' ? 'সরবরাহকারীদের থেকে ইনভেন্টরি ক্রয় রেকর্ড করুন, খরচ ট্র্যাক করুন এবং স্বয়ংক্রিয় স্টক আপডেট পান।' :
+             user.language === 'hi' ? 'आपूर्तिकर्ताओं से इन्वेंट्री खरीद दर्ज करें, लागत ट्रैक करें और स्वचालित स्टॉक अपडेट प्राप्त करें।' :
+             'Record business inventory purchases from suppliers, track costs, and auto-increment stock levels.'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -119,7 +125,11 @@ export default function PurchasesModule({ user, onRefreshStats }: PurchasesModul
             className="flex items-center gap-1.5 bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer shadow-lg"
           >
             <Plus className="w-4 h-4" />
-            Add Supplier Purchase
+            {user.language === 'ur' ? 'سپلائر خریداری درج کریں' : 
+             user.language === 'ar' ? 'إضافة مشتريات مورد' : 
+             user.language === 'bn' ? 'নতুন ক্রয় যোগ করুন' : 
+             user.language === 'hi' ? 'सप्लायर खरीद जोड़ें' : 
+             'Add Supplier Purchase'}
           </button>
         </div>
       </div>

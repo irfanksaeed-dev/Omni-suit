@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import ConfirmModal from './ConfirmModal';
 import { jsPDF } from 'jspdf';
 import { cleanPhoneForWhatsApp, getDefaultPhoneCode } from '../utils/phone';
+import { getBaseAppUrl, copyTextToClipboard, openExternalLink } from '../utils/links';
 
 interface CustomersModuleProps {
   user: UserTenant;
@@ -643,7 +644,7 @@ export default function CustomersModule({ user, onRefreshStats }: CustomersModul
     const cleanedNum = cleanPhoneForWhatsApp(cust.phone || '', defaultCode);
     
     // Construct the secure client registration and lookup email linkage link:
-    const portalUrl = `${window.location.origin}?customerEmail=${encodeURIComponent(cust.email || '')}&customerPhone=${encodeURIComponent(cust.phone || '')}&invoiceId=${inv.id}`;
+    const portalUrl = `${getBaseAppUrl()}?customerEmail=${encodeURIComponent(cust.email || '')}&customerPhone=${encodeURIComponent(cust.phone || '')}&invoiceId=${inv.id}`;
 
     const text = `Hello! Here is your invoice from *${company}*:\n\n` +
                  `*Invoice Number*: ${inv.invoiceNumber}\n` +
@@ -659,7 +660,7 @@ export default function CustomersModule({ user, onRefreshStats }: CustomersModul
       ? `https://api.whatsapp.com/send?phone=${cleanedNum}&text=${encodeURIComponent(text)}`
       : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     
-    window.open(waUrl, '_blank');
+    openExternalLink(waUrl, '_blank');
   };
 
   const [customers, setCustomers] = useState<Customer[]>(() => getCustomers(user.id));
@@ -2019,25 +2020,25 @@ export default function CustomersModule({ user, onRefreshStats }: CustomersModul
                   onClick={() => generateInvoicePDF(quickInvoiceView, profileCust!)}
                   title={user.language === 'ur' ? 'انوائس فائل ڈاؤن لوڈ کرنے کے لیے یہاں کلک کریں' : 'Click anywhere on this layout to download high-fidelity PDF invoice'}
                 >
-                  <div className="flex justify-between items-start border-b pb-6 border-slate-200">
-                    <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-12 print:grid-cols-12 gap-4 items-start border-b pb-6 border-slate-200">
+                    <div className="sm:col-span-7 print:col-span-7 min-w-0">
                       {user.logoUrl ? (
                         <img src={user.logoUrl} alt="Company Logo" className="h-10 object-contain mb-3 referrer-policy" referrerPolicy="no-referrer" />
                       ) : (
                         <div className="w-20 h-10 bg-indigo-500/10 text-indigo-600 flex items-center justify-center font-black rounded-lg text-sm mb-3">LOGO</div>
                       )}
-                      <p className="font-bold text-slate-800 text-sm">{user.companyName}</p>
-                      <p className="text-slate-500 text-[11px]">{user.address || 'Capital Headquarters'}</p>
+                      <p className="font-bold text-slate-800 text-sm break-words">{user.companyName}</p>
+                      <p className="text-slate-500 text-[11px] break-words">{user.address || 'Capital Headquarters'}</p>
                       <p className="text-slate-500 text-[11px]">Phone: {user.phone || '-'}</p>
-                      {user.taxNumber && <p className="text-slate-900 font-extrabold font-mono text-[11px] mt-1">TRN Tax ID: {user.taxNumber}</p>}
+                      {user.taxNumber && <p className="text-slate-900 font-extrabold font-mono text-[11px] mt-1 break-words">TRN Tax ID: {user.taxNumber}</p>}
                     </div>
-                    <div className="text-right">
-                      <h1 className="text-xl font-black text-indigo-950 uppercase">
+                    <div className="sm:col-span-5 print:col-span-5 sm:text-right print:text-right min-w-0">
+                      <h1 className="text-lg sm:text-xl font-black text-indigo-950 uppercase">
                         {user.language === 'ar' ? 'فاتورة ضريبية مبسطة' : user.language === 'ur' ? 'ٹیکس انوائس' : 'TAX INVOICE'}
                       </h1>
-                      <p className="font-mono font-black text-base text-slate-950 mt-1">{quickInvoiceView.invoiceNumber}</p>
+                      <p className="font-mono font-black text-sm sm:text-base text-slate-950 mt-1">{quickInvoiceView.invoiceNumber}</p>
                       
-                      <div className="mt-4 space-y-1 text-slate-500 text-[11px]">
+                      <div className="mt-3 sm:mt-4 space-y-1 text-slate-500 text-[11px]">
                         <p>Date: <strong className="text-slate-800 font-mono">{quickInvoiceView.date}</strong></p>
                         <p>Due Date: <strong className="text-slate-800 font-mono">{quickInvoiceView.dueDate}</strong></p>
                         <p>Status: <strong className="uppercase font-extrabold text-emerald-600">{quickInvoiceView.status}</strong></p>
@@ -2046,75 +2047,80 @@ export default function CustomersModule({ user, onRefreshStats }: CustomersModul
                   </div>
 
                   {/* Billed To Customer Bio Section */}
-                  <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 text-[11px]">
-                    <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 print:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 text-[11px]">
+                    <div className="min-w-0">
                       <span className="font-black text-slate-400 text-[9px] uppercase block tracking-wider">Billed To (Buyer) / العميل:</span>
-                      <p className="font-black text-slate-900 text-sm mt-1">{profileCust.name}</p>
-                      <p className="text-slate-500">{profileCust.email}</p>
+                      <p className="font-black text-slate-900 text-sm mt-1 break-words">{profileCust.name}</p>
+                      <p className="text-slate-500 break-words">{profileCust.email}</p>
                       <p className="text-slate-500">{profileCust.phone}</p>
                     </div>
-                    <div className="text-right">
+                    <div className="sm:text-right print:text-right min-w-0">
                       <span className="font-black text-slate-400 text-[9px] uppercase block tracking-wider">Billing Node Registry</span>
-                      <p className="text-slate-600 mt-1 font-mono">Location Domain: {profileCust.address || 'Address not registered'}</p>
+                      <p className="text-slate-600 mt-1 font-mono break-words">Location Domain: {profileCust.address || 'Address not registered'}</p>
                       <p className="text-slate-500">Channel Type: Client Account Portal</p>
                     </div>
                   </div>
 
                   {/* Items list table */}
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-300 text-slate-400 font-black uppercase text-[9px] bg-slate-50">
-                        <th className="py-2 px-3">Description / البيان</th>
-                        <th className="py-2 px-3 text-right">Price / السعر</th>
-                        <th className="py-2 px-3 text-center">Qty / الكمية</th>
-                        <th className="py-2 px-3 text-right text-indigo-900">Tax (%)</th>
-                        <th className="py-2 px-3 text-right">Total Net / المجموع</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {quickInvoiceView.items.map((item, idx) => (
-                        <tr key={idx} className="font-sans">
-                          <td className="py-2.5 px-3">
-                            <p className="font-bold text-slate-900">{item.productName}</p>
-                            <p className="text-[10px] text-slate-400">Standard Product SKU Reference Code</p>
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-mono text-slate-900">{currencySymbol}{item.price.toFixed(2)}</td>
-                          <td className="py-2.5 px-3 text-center font-mono text-slate-900">{item.quantity}</td>
-                          <td className="py-2.5 px-3 text-right font-mono text-slate-500">{quickInvoiceView.taxRate || user.taxRate}%</td>
-                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">{currencySymbol}{item.total.toFixed(2)}</td>
+                  <div className="overflow-x-auto print:overflow-visible w-full">
+                    <table className="w-full text-left border-collapse text-xs table-auto sm:table-fixed">
+                      <thead>
+                        <tr className="border-b border-slate-300 text-slate-400 font-black uppercase text-[9px] bg-slate-50">
+                          <th className="py-2 px-2 sm:px-3 w-[45%] sm:w-[45%] print:w-[45%]">Description / البيان</th>
+                          <th className="py-2 px-2 sm:px-3 text-right w-[20%] sm:w-[18%] print:w-[18%]">Price / السعر</th>
+                          <th className="py-2 px-1.5 sm:px-3 text-center w-[12%] sm:w-[12%] print:w-[12%]">Qty / الكمية</th>
+                          <th className="py-2 px-1.5 sm:px-3 text-right text-indigo-900 w-[11%] sm:w-[11%] print:w-[11%]">Tax (%)</th>
+                          <th className="py-2 px-2 sm:px-3 text-right w-[20%] sm:w-[18%] print:w-[18%]">Total Net / المجموع</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {quickInvoiceView.items.map((item, idx) => (
+                          <tr key={idx} className="font-sans">
+                            <td className="py-2 px-2 sm:px-3 break-words min-w-0">
+                              <p className="font-bold text-slate-900">{item.productName}</p>
+                              <p className="text-[10px] text-slate-400">Standard Product SKU Reference Code</p>
+                            </td>
+                            <td className="py-2 px-2 sm:px-3 text-right font-mono text-slate-900 whitespace-nowrap">{currencySymbol}{item.price.toFixed(2)}</td>
+                            <td className="py-2 px-1.5 sm:px-3 text-center font-mono text-slate-900 whitespace-nowrap">{item.quantity}</td>
+                            <td className="py-2 px-1.5 sm:px-3 text-right font-mono text-slate-500 whitespace-nowrap">{quickInvoiceView.taxRate || user.taxRate}%</td>
+                            <td className="py-2 px-2 sm:px-3 text-right font-mono font-bold text-slate-900 whitespace-nowrap">{currencySymbol}{item.total.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
 
                   {/* Pricing aggregation summaries */}
-                  <div className="flex justify-end pt-5 text-xs text-slate-900 border-t">
-                    <div className="w-64 space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-slate-500 font-semibold">Subtotal / المجموع الفرعي:</span>
-                        <span className="font-mono font-bold">{currencySymbol}{quickInvoiceView.subtotal.toFixed(2)}</span>
+                  <div className="flex flex-col sm:flex-row justify-between items-start pt-5 text-xs text-slate-900 border-t gap-4">
+                    <div className="text-[10px] text-slate-400 italic">
+                      <p>Terms: Standard payment terms apply. Powered by {user.companyName}.</p>
+                    </div>
+                    <div className="w-full sm:max-w-xs sm:ml-auto space-y-2 bg-slate-50/70 p-3 rounded-xl border border-slate-100">
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="text-slate-500 font-semibold truncate">Subtotal / المجموع الفرعي:</span>
+                        <span className="font-mono font-bold shrink-0">{currencySymbol}{quickInvoiceView.subtotal.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-500 font-semibold">Tax / قيمة الضريبة ({quickInvoiceView.taxRate || user.taxRate}%):</span>
-                        <span className="font-mono text-slate-700">{currencySymbol}{quickInvoiceView.taxAmount.toFixed(2)}</span>
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="text-slate-500 font-semibold truncate">Tax / قيمة الضريبة ({quickInvoiceView.taxRate || user.taxRate}%):</span>
+                        <span className="font-mono text-slate-700 shrink-0">{currencySymbol}{quickInvoiceView.taxAmount.toFixed(2)}</span>
                       </div>
                       {quickInvoiceView.discount > 0 && (
-                        <div className="flex justify-between text-rose-650">
-                          <span className="text-rose-600 font-semibold">Discount / الخصم:</span>
-                          <span className="font-mono font-bold">-{currencySymbol}{quickInvoiceView.discount.toFixed(2)}</span>
+                        <div className="flex justify-between items-center gap-2 text-rose-650">
+                          <span className="text-rose-600 font-semibold truncate">Discount / الخصم:</span>
+                          <span className="font-mono font-bold shrink-0">-{currencySymbol}{quickInvoiceView.discount.toFixed(2)}</span>
                         </div>
                       )}
-                      <div className="flex justify-between border-t border-dashed pt-2 text-sm font-black text-indigo-950">
-                        <span>Total Payable / إجمالي المبلغ:</span>
-                        <span className="font-mono">{currencySymbol}{quickInvoiceView.total.toFixed(2)}</span>
+                      <div className="flex justify-between items-center gap-2 border-t border-dashed pt-2 text-sm font-black text-indigo-950">
+                        <span className="truncate">Total Payable / إجمالي المبلغ:</span>
+                        <span className="font-mono shrink-0">{currencySymbol}{quickInvoiceView.total.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between text-emerald-600 font-bold">
-                        <span>Amount Paid / المبلغ المدفوع:</span>
-                        <span className="font-mono">{currencySymbol}{(quickInvoiceView.amountPaid !== undefined ? quickInvoiceView.amountPaid : (quickInvoiceView.status === 'paid' ? quickInvoiceView.total : 0)).toFixed(2)}</span>
+                      <div className="flex justify-between items-center gap-2 text-emerald-600 font-bold text-[11px]">
+                        <span className="truncate">Amount Paid / المبلغ المدفوع:</span>
+                        <span className="font-mono shrink-0">{currencySymbol}{(quickInvoiceView.amountPaid !== undefined ? quickInvoiceView.amountPaid : (quickInvoiceView.status === 'paid' ? quickInvoiceView.total : 0)).toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between text-rose-600 font-extrabold border-t border-slate-100 pt-1">
-                        <span>Due Balance / المتبقي المستحق:</span>
-                        <span className="font-mono text-sm">{currencySymbol}{(quickInvoiceView.balanceDue !== undefined ? quickInvoiceView.balanceDue : (quickInvoiceView.status === 'paid' ? 0 : quickInvoiceView.total)).toFixed(2)}</span>
+                      <div className="flex justify-between items-center gap-2 text-rose-600 font-extrabold border-t border-slate-100 pt-1 text-[11px]">
+                        <span className="truncate">Due Balance / المتبقی المستحق:</span>
+                        <span className="font-mono text-sm shrink-0">{currencySymbol}{(quickInvoiceView.balanceDue !== undefined ? quickInvoiceView.balanceDue : (quickInvoiceView.status === 'paid' ? 0 : quickInvoiceView.total)).toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
@@ -2936,13 +2942,13 @@ export default function CustomersModule({ user, onRefreshStats }: CustomersModul
                   const resolvedMessage = resolveTemplateText(defaultTemplate, item);
                   const handleDirectWhatsApp = () => {
                     const url = `https://api.whatsapp.com/send?phone=${cleanedPhone}&text=${encodeURIComponent(resolvedMessage)}`;
-                    window.open(url, '_blank');
+                    openExternalLink(url, '_blank');
                   };
 
                   const handleDirectEmail = () => {
                     const subject = `Pending Accounts Statement Notice - ${user.companyName}`;
                     const url = `mailto:${encodeURIComponent(item.customer.email || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(resolvedMessage)}`;
-                    window.location.href = url;
+                    openExternalLink(url, '_self');
                   };
 
                   const handleToggleEditDraft = () => {
@@ -2957,13 +2963,13 @@ export default function CustomersModule({ user, onRefreshStats }: CustomersModul
 
                   const handleSendCustomWhatsApp = () => {
                     const url = `https://api.whatsapp.com/send?phone=${cleanedPhone}&text=${encodeURIComponent(customDraftText)}`;
-                    window.open(url, '_blank');
+                    openExternalLink(url, '_blank');
                   };
 
                   const handleSendCustomEmail = () => {
                     const subject = `Accounts Statement Notice - ${user.companyName}`;
                     const url = `mailto:${encodeURIComponent(item.customer.email || '')}?subject=${encodeURIComponent(customDraftText)}`;
-                    window.location.href = url;
+                    openExternalLink(url, '_self');
                   };
 
                   return (

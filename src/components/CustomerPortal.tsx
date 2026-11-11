@@ -6,43 +6,45 @@ import { FileText, LogOut, CheckCircle, Clock, DollarSign, Printer, Download, Gl
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import { cleanPhoneForWhatsApp, getDefaultPhoneCode } from '../utils/phone';
+import { getBaseAppUrl, copyTextToClipboard, openExternalLink } from '../utils/links';
 
 const bilingualTerms = {
-  invoiceTitle: { en: 'TAX INVOICE', ar: 'فاتورة ضريبية مبسطة', ur: 'ٹیکس انوائس', hi: 'टैक्स इनवॉइस' },
-  invoiceNumber: { en: 'Invoice Number', ar: 'رقم الفاتورة', ur: 'انوائس نمبر', hi: 'इनवॉइस नंबर' },
-  date: { en: 'Date of Issue', ar: 'تاريخ الإصدار', ur: 'تاریخ اجراء', hi: 'जारी करने की तिथि' },
-  dueDate: { en: 'Due Date', ar: 'تاريخ الاستحقاق', ur: 'آخری تاریخ', hi: 'देय तिथि' },
-  billedTo: { en: 'Billed To (Buyer)', ar: 'الفاتورة إلى (العميل)', ur: 'بل بنام (خریدار)', hi: 'बिल प्राप्तकर्ता (क्रेता)' },
-  status: { en: 'Payment Status', ar: 'حالة السداد', ur: 'ادائیگی کی صورتحال', hi: 'भुगतान की स्थिति' },
-  description: { en: 'Description / Particulars', ar: 'البيان / تفاصيل السلع', ur: 'تفصیل / سامان کا نام', hi: 'विवरण / विशेष' },
-  qty: { en: 'Qty', ar: 'الكمية', ur: 'مقدار', hi: 'मात्रा' },
-  price: { en: 'Unit Price', ar: 'سعر الوحدة', ur: 'یونٹ کی قیمت', hi: 'इकाई मूल्य' },
-  total: { en: 'Total Amount', ar: 'المجموع الإجمالي', ur: 'کل رقم', hi: 'कुल राशि' },
-  subtotal: { en: 'Subtotal (Excl. VAT)', ar: 'المجموع الفرعي (خاضع للضريبة)', ur: 'ذیلی کل (ٹیکس کے بغیر)', hi: 'उप-योग (बिना टैक्स)' },
-  tax: { en: 'VAT (Tax Amount)', ar: 'ضريبة القيمة المضافة', ur: 'ٹیکس رقم (واٹ)', hi: 'वैट (टैक्स राशि)' },
-  discount: { en: 'Discount', ar: 'الخصم الممنوح', ur: 'رعایت / ڈسکاؤنٹ', hi: 'छूट (डिस्काउंट)' },
-  totalPayable: { en: 'Total Payable (Incl. VAT)', ar: 'إجمالي المبلغ المستحق', ur: 'قابل ادائیگی رقم (ٹیکس سمیت)', hi: 'कुल देय राशि (टैक्स सहित)' },
-  amountPaid: { en: 'Amount Paid', ar: 'المبلغ المدفوع', ur: 'ادا شدہ رقم', hi: 'भुगतान की गई राशि' },
-  balanceDue: { en: 'Balance Due', ar: 'المتبقي المستحق', ur: 'باقی رقم', hi: 'शेष राशि' },
-  notes: { en: 'Notes & Payment Terms', ar: 'الشروط وملاحظات الدفع', ur: 'نوٹ اور شرائط', hi: 'नोट और भुगतान की शर्तें' },
-  trn: { en: 'VAT TRN (Seller Tax ID)', ar: 'الرقم الضريبي للمنشأة', ur: 'سپلائر ٹیکس رجسٹریشن نمبر', hi: 'विक्रेता टैक्स आईडी (TRN)' },
-  buyerTrn: { en: 'Buyer Tax ID (TRN)', ar: 'الرقم الضريبي للمشتري', ur: 'خریدار ٹیکس رجسٹریشن نمبر', hi: 'क्रेता टैक्स आईडी (TRN)' },
-  authorizedSign: { en: 'Prepared / Authorized Signature', ar: 'توقيع الجهة المعتمد', ur: 'مجاز دستخط', hi: 'अधिकृत हस्ताक्षर' },
-  thankYou: { en: 'Thank you for your business!', ar: 'نشكركم على تعاملكم معنا ونقدر ثقتكم!', ur: 'آپ کے تعاون کا شکریہ!', hi: 'आपके व्यवसाय के लिए धन्यवाद!' },
-  paidStatus: { en: 'PAID', ar: 'مدفوعة', ur: 'ادا شدہ', hi: 'भुगतान किया गया' },
-  unpaidStatus: { en: 'UNPAID', ar: 'غير مدفوعة', ur: 'غیر ادا شدہ', hi: 'अवैतनिक' },
-  via: { en: 'Via', ar: 'وسيلة الدفع', ur: 'بذریعہ', hi: 'के माध्यम से' }
+  invoiceTitle: { en: 'TAX INVOICE', ar: 'فاتورة ضريبية مبسطة', ur: 'ٹیکس انوائس', bn: 'ট্যাক্স চালান (চালানপত্র)', hi: 'टैक्स इनवॉइस' },
+  invoiceNumber: { en: 'Invoice Number', ar: 'رقم الفاتورة', ur: 'انوائس نمبر', bn: 'চালান নম্বর', hi: 'इनवॉइस नंबर' },
+  date: { en: 'Date of Issue', ar: 'تاريخ الإصدار', ur: 'تاریخ اجراء', bn: 'ইস্যুর তারিখ', hi: 'जारी करने की तिथि' },
+  dueDate: { en: 'Due Date', ar: 'تاريخ الاستحقاق', ur: 'آخری تاریخ', bn: 'পরিশোধের শেষ তারিখ', hi: 'देय तिथि' },
+  billedTo: { en: 'Billed To (Buyer)', ar: 'الفاتورة إلى (العميل)', ur: 'بل بنام (خریدار)', bn: 'ক্রেতার বিবরণ', hi: 'बिल प्राप्तकर्ता (क्रेता)' },
+  status: { en: 'Payment Status', ar: 'حالة السداد', ur: 'ادائیگی کی صورتحال', bn: 'পরিশোধের অবস্থা', hi: 'भुगतान की स्थिति' },
+  description: { en: 'Description / Particulars', ar: 'البيان / تفاصيل السلع', ur: 'تفصیل / سامان کا نام', bn: 'বিবরণ / পণ্যের নাম', hi: 'विवरण / विशेष' },
+  qty: { en: 'Qty', ar: 'الكمية', ur: 'مقدار', bn: 'পরিমাণ', hi: 'मात्रा' },
+  price: { en: 'Unit Price', ar: 'سعر الوحدة', ur: 'یونٹ کی قیمت', bn: 'একক মূল্য', hi: 'इकाई मूल्य' },
+  total: { en: 'Total Amount', ar: 'المجموع الإجمالي', ur: 'کل رقم', bn: 'মোট টাকা', hi: 'कुल राशि' },
+  subtotal: { en: 'Subtotal (Excl. VAT)', ar: 'المجموع الفرعي (خاضع للضريبة)', ur: 'ذیلی کل (ٹیکس کے بغیر)', bn: 'উপ-মোট (ভ্যাট ছাড়া)', hi: 'उप-योग (बिना टैक्स)' },
+  tax: { en: 'VAT (Tax Amount)', ar: 'ضريبة القيمة المضافة', ur: 'ٹیکس رقم (واٹ)', bn: 'ভ্যাট / কর', hi: 'वैट (टैक्स राशि)' },
+  discount: { en: 'Discount', ar: 'الخصم الممنوح', ur: 'رعایت / ڈسکاؤنٹ', bn: 'ছাড় (ডিসকাউন্ট)', hi: 'छूट (डिस्काउंट)' },
+  totalPayable: { en: 'Total Payable (Incl. VAT)', ar: 'إجمالي المبلغ المستحق', ur: 'قابل ادائیگی رقم (ٹیکس سمیت)', bn: 'সর্বমোট প্রদেয়', hi: 'कुल देय राशि (टैक्स सहित)' },
+  amountPaid: { en: 'Amount Paid', ar: 'المبلغ المدفوع', ur: 'ادا شدہ رقم', bn: 'পরিশোধিত টাকা', hi: 'भुगतान की गई राशि' },
+  balanceDue: { en: 'Balance Due', ar: 'المتبقي المستحق', ur: 'باقی رقم', bn: 'বকেয়া টাকা', hi: 'शेष राशि' },
+  notes: { en: 'Notes & Payment Terms', ar: 'الشروط وملاحظات الدفع', ur: 'نوٹ اور شرائط', bn: 'শর্তাবলী ও নোট', hi: 'नोट और भुगतान की शर्तें' },
+  trn: { en: 'VAT TRN (Seller Tax ID)', ar: 'الرقم الضريبي للمنشأة', ur: 'سپلائر ٹیکس رجسٹریشن نمبر', bn: 'বিক্রেতার ট্যাক্স আইডি (TRN)', hi: 'विक्रेता टैक्स आईडी (TRN)' },
+  buyerTrn: { en: 'Buyer Tax ID (TRN)', ar: 'الرقم الضريبي للمشتري', ur: 'خریدار ٹیکس رجسٹریشن نمبر', bn: 'ক্রেতার ট্যাক্স আইডি (TRN)', hi: 'क्रेता टैक्स आईडी (TRN)' },
+  authorizedSign: { en: 'Prepared / Authorized Signature', ar: 'توقيع الجهة المعتمد', ur: 'مجاز دستخط', bn: 'অনুমোদিত স্বাক্ষর', hi: 'अधिकृत हस्ताक्षर' },
+  thankYou: { en: 'Thank you for your business!', ar: 'نشكركم على تعاملكم معنا ونقدر ثقتكم!', ur: 'آپ کے تعاون کا شکریہ!', bn: 'আমাদের সাথে ব্যবসা করার জন্য ধন্যবাদ!', hi: 'आपके व्यवसाय के लिए धन्यवाद!' },
+  paidStatus: { en: 'PAID', ar: 'مدفوعة', ur: 'ادا شدہ', bn: 'পরিশোধিত', hi: 'भुगतान किया गया' },
+  unpaidStatus: { en: 'UNPAID', ar: 'غير مدفوعة', ur: 'غیر ادا شدہ', bn: 'অপরিশোধিত', hi: 'अवैतनिक' },
+  via: { en: 'Via', ar: 'وسيلة الدفع', ur: 'بذریعہ', bn: 'মাধ্যমে', hi: 'के माध्यम से' }
 };
 
 const getBilingualValueAndForward = (
   key: keyof typeof bilingualTerms,
-  lang: 'en' | 'ar' | 'ur' | 'hi' | 'both',
-  secondaryLang: 'ar' | 'ur' | 'hi' = 'ar'
+  lang: 'en' | 'ar' | 'ur' | 'bn' | 'hi' | 'both',
+  secondaryLang: 'ar' | 'ur' | 'bn' | 'hi' = 'ar'
 ) => {
   const item = bilingualTerms[key];
   if (lang === 'en') return <span className="font-sans leading-relaxed">{item.en}</span>;
   if (lang === 'ar') return <span className="font-sans font-semibold leading-relaxed text-right block" dir="rtl">{item.ar}</span>;
   if (lang === 'ur') return <span className="font-sans font-semibold leading-relaxed text-right block" dir="rtl">{item.ur}</span>;
+  if (lang === 'bn') return <span className="font-sans leading-relaxed">{item.bn}</span>;
   if (lang === 'hi') return <span className="font-sans leading-relaxed">{item.hi}</span>;
 
   // Bilingual / Both Mode
@@ -61,14 +63,15 @@ const getBilingualValueAndForward = (
 
 const getBilingualStringAndForward = (
   key: keyof typeof bilingualTerms,
-  lang: 'en' | 'ar' | 'ur' | 'hi' | 'both',
-  secondaryLang: 'ar' | 'ur' | 'hi' = 'ar',
+  lang: 'en' | 'ar' | 'ur' | 'bn' | 'hi' | 'both',
+  secondaryLang: 'ar' | 'ur' | 'bn' | 'hi' = 'ar',
   separator: string = ' / '
 ) => {
   const item = bilingualTerms[key];
   if (lang === 'en') return item.en;
   if (lang === 'ar') return item.ar;
   if (lang === 'ur') return item.ur;
+  if (lang === 'bn') return item.bn;
   if (lang === 'hi') return item.hi;
 
   const secondaryText = item[secondaryLang] || item.ar;
@@ -95,7 +98,7 @@ export default function CustomerPortal({ customer, merchant, onSignOut, initialI
     return null;
   });
   const [filter, setFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
-  const [receiptLang, setReceiptLang] = useState<'en' | 'ar' | 'ur' | 'hi' | 'both'>('both');
+  const [receiptLang, setReceiptLang] = useState<'en' | 'ar' | 'ur' | 'bn' | 'hi' | 'both'>('both');
   const [sharingPhone, setSharingPhone] = useState(() => customer.phone && !customer.phone.includes('unregistered') ? customer.phone : '');
   const [countryCode, setCountryCode] = useState(() => {
     if (merchant.currency === 'AED') return '971';
@@ -415,7 +418,7 @@ export default function CustomerPortal({ customer, merchant, onSignOut, initialI
     const defaultCode = getDefaultPhoneCode(merchant.currency);
     const cleanedNum = cleanPhoneForWhatsApp(activePhone, defaultCode);
     
-    const portalUrl = `${window.location.origin}?invoiceId=${inv.id}`;
+    const portalUrl = `${getBaseAppUrl()}?invoiceId=${inv.id}`;
 
     const text = `Hello! Here is your invoice from *${company}*:\n\n` +
                  `*Invoice Number*: ${inv.invoiceNumber}\n` +
@@ -431,7 +434,7 @@ export default function CustomerPortal({ customer, merchant, onSignOut, initialI
       ? `https://api.whatsapp.com/send?phone=${cleanedNum}&text=${encodeURIComponent(text)}`
       : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     
-    window.open(waUrl, '_blank');
+    openExternalLink(waUrl, '_blank');
   };
 
   return (
@@ -440,24 +443,24 @@ export default function CustomerPortal({ customer, merchant, onSignOut, initialI
       <div id="printable-area" className="hidden print:block text-black p-8 bg-white min-h-screen">
         {selectedInvoice && (
           <div className="space-y-6 text-xs font-sans leading-relaxed text-slate-800" dir={receiptLang === 'ar' || receiptLang === 'ur' ? 'rtl' : 'ltr'}>
-            <div className="flex justify-between items-start border-b pb-6 border-slate-200">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-12 print:grid-cols-12 gap-4 items-start border-b pb-6 border-slate-200">
+              <div className="sm:col-span-7 print:col-span-7 min-w-0">
                 {merchant.logoUrl ? (
                   <img src={merchant.logoUrl} alt="Logo" className="max-h-12 max-w-xs object-contain mb-3" referrerPolicy="no-referrer" />
                 ) : (
                   <div className="font-extrabold text-lg text-indigo-900 tracking-tight">{merchant.companyName}</div>
                 )}
-                <p className="font-bold text-slate-800">{merchant.companyName}</p>
-                <p className="text-slate-500">{merchant.address || 'Heaquaters Office'}</p>
+                <p className="font-bold text-slate-800 break-words">{merchant.companyName}</p>
+                <p className="text-slate-500 break-words">{merchant.address || 'Headquarters Office'}</p>
                 <p className="text-slate-500">Phone: {merchant.phone || '-'}</p>
-                {merchant.taxNumber && <p className="text-slate-900 font-bold font-mono">TRN VAT ID: {merchant.taxNumber}</p>}
+                {merchant.taxNumber && <p className="text-slate-900 font-bold font-mono break-words">TRN VAT ID: {merchant.taxNumber}</p>}
               </div>
-              <div className="text-right">
-                <h1 className="text-2xl font-black text-indigo-900 uppercase">
+              <div className="sm:col-span-5 print:col-span-5 sm:text-right print:text-right min-w-0">
+                <h1 className="text-xl sm:text-2xl font-black text-indigo-900 uppercase">
                   {getBilingualString('invoiceTitle', receiptLang)}
                 </h1>
                 <p className="font-mono font-black text-base text-slate-900 mt-2">{selectedInvoice.invoiceNumber}</p>
-                <div className="mt-4 space-y-1 text-slate-500">
+                <div className="mt-3 sm:mt-4 space-y-1 text-slate-500">
                   <p>{getBilingualString('date', receiptLang)}: <strong className="text-slate-800 font-mono">{selectedInvoice.date}</strong></p>
                   <p>{getBilingualString('dueDate', receiptLang)}: <strong className="text-slate-800 font-mono">{selectedInvoice.dueDate}</strong></p>
                   <p>{getBilingualString('status', receiptLang)}: <strong className="uppercase font-bold text-emerald-600">{selectedInvoice.status === 'paid' ? getBilingualString('paidStatus', receiptLang) : getBilingualString('unpaidStatus', receiptLang)}</strong></p>
@@ -465,69 +468,71 @@ export default function CustomerPortal({ customer, merchant, onSignOut, initialI
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-6 bg-slate-50 p-4 rounded-xl border border-slate-100">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 print:grid-cols-2 gap-4 sm:gap-6 bg-slate-50 p-4 rounded-xl border border-slate-100">
+              <div className="min-w-0">
                 <span className="font-extrabold text-[10px] uppercase text-slate-400 block tracking-wider">
                   {getBilingualString('billedTo', receiptLang)}:
                 </span>
-                <p className="font-black text-slate-900 text-sm mt-1">{customer.name}</p>
-                <p className="text-slate-500 mt-1">{customer.email}</p>
+                <p className="font-black text-slate-900 text-sm mt-1 break-words">{customer.name}</p>
+                <p className="text-slate-500 mt-1 break-words">{customer.email}</p>
                 <p className="text-slate-500">{customer.phone}</p>
-                <p className="text-slate-500 text-[10px]">{customer.address}</p>
+                <p className="text-slate-500 text-[10px] break-words">{customer.address}</p>
               </div>
-              <div className="text-right flex flex-col justify-between">
+              <div className="sm:text-right print:text-right flex flex-col justify-between min-w-0">
                 <div>
                   <span className="font-extrabold text-[10px] uppercase text-slate-400 block tracking-wider">Default Currency / العملة:</span>
                   <span className="font-mono font-black text-sm text-indigo-950">{merchant.currency}</span>
                 </div>
                 {selectedInvoice.notes && (
-                  <div className="text-slate-500 text-[10px] italic">
+                  <div className="text-slate-500 text-[10px] italic mt-2 break-words">
                     Note: {selectedInvoice.notes}
                   </div>
                 )}
               </div>
             </div>
 
-            <table className="w-full text-left border-collapse mt-4 text-xs">
-              <thead>
-                <tr className="border-b border-slate-300 text-slate-400 font-black tracking-wider uppercase text-[9px] bg-slate-50">
-                  <th className="py-2 px-3">{getBilingualString('description', receiptLang)}</th>
-                  <th className="py-2 px-3 text-right">{getBilingualString('price', receiptLang)}</th>
-                  <th className="py-2 px-3 text-center">{getBilingualString('qty', receiptLang)}</th>
-                  <th className="py-2 px-2 text-right">Tax (%)</th>
-                  <th className="py-2 px-3 text-right">{getBilingualString('total', receiptLang)}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
-                {selectedInvoice.items.map((item, idx) => (
-                  <tr key={idx}>
-                    <td className="py-2.5 px-3">
-                      <p className="font-bold text-slate-900">{item.productName}</p>
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono">{currencySymbol}{item.price.toFixed(2)}</td>
-                    <td className="py-2.5 px-3 text-center font-mono">{item.quantity}</td>
-                    <td className="py-2.5 px-2 text-right font-mono">{selectedInvoice.taxRate || merchant.taxRate || 5}%</td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                      {currencySymbol}{item.total.toFixed(2)}
-                    </td>
+            <div className="overflow-x-auto print:overflow-visible w-full">
+              <table className="w-full text-left border-collapse mt-4 text-xs table-auto sm:table-fixed">
+                <thead>
+                  <tr className="border-b border-slate-300 text-slate-400 font-black tracking-wider uppercase text-[9px] bg-slate-50">
+                    <th className="py-2 px-2 sm:px-3 w-[45%] sm:w-[45%] print:w-[45%]">{getBilingualString('description', receiptLang)}</th>
+                    <th className="py-2 px-2 sm:px-3 text-right w-[18%] sm:w-[18%] print:w-[18%]">{getBilingualString('price', receiptLang)}</th>
+                    <th className="py-2 px-1.5 sm:px-3 text-center w-[12%] sm:w-[12%] print:w-[12%]">{getBilingualString('qty', receiptLang)}</th>
+                    <th className="py-2 px-1.5 sm:px-2 text-right w-[10%] sm:w-[10%] print:w-[10%]">Tax (%)</th>
+                    <th className="py-2 px-2 sm:px-3 text-right w-[18%] sm:w-[18%] print:w-[18%]">{getBilingualString('total', receiptLang)}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {selectedInvoice.items.map((item, idx) => (
+                    <tr key={idx}>
+                      <td className="py-2.5 px-2 sm:px-3 break-words min-w-0">
+                        <p className="font-bold text-slate-900">{item.productName}</p>
+                      </td>
+                      <td className="py-2.5 px-2 sm:px-3 text-right font-mono whitespace-nowrap">{currencySymbol}{item.price.toFixed(2)}</td>
+                      <td className="py-2.5 px-1.5 sm:px-3 text-center font-mono whitespace-nowrap">{item.quantity}</td>
+                      <td className="py-2.5 px-1.5 sm:px-2 text-right font-mono whitespace-nowrap">{selectedInvoice.taxRate || merchant.taxRate || 5}%</td>
+                      <td className="py-2.5 px-2 sm:px-3 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
+                        {currencySymbol}{item.total.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-            <div className="flex justify-end pt-5 text-xs text-slate-900">
-              <div className="w-64 space-y-2 border-t pt-4 border-slate-200">
-                <div className="flex justify-between">
-                  <span>{getBilingualString('subtotal', receiptLang)}:</span>
-                  <span className="font-mono font-bold">{currencySymbol}{selectedInvoice.subtotal.toFixed(2)}</span>
+            <div className="flex flex-col sm:flex-row justify-end pt-5 text-xs text-slate-900">
+              <div className="w-full sm:max-w-xs space-y-2 border-t pt-4 border-slate-200">
+                <div className="flex justify-between items-center gap-2">
+                  <span className="truncate">{getBilingualString('subtotal', receiptLang)}:</span>
+                  <span className="font-mono font-bold shrink-0">{currencySymbol}{selectedInvoice.subtotal.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{getBilingualString('tax', receiptLang)} ({merchant.taxRate || 5}%):</span>
-                  <span className="font-mono text-slate-700">{currencySymbol}{selectedInvoice.taxAmount.toFixed(2)}</span>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="truncate">{getBilingualString('tax', receiptLang)} ({merchant.taxRate || 5}%):</span>
+                  <span className="font-mono text-slate-700 shrink-0">{currencySymbol}{selectedInvoice.taxAmount.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between border-t border-dashed pt-2 text-sm font-black text-indigo-950">
-                  <span>{getBilingualString('totalPayable', receiptLang)}:</span>
-                  <span className="font-mono">{currencySymbol}{selectedInvoice.total.toFixed(2)}</span>
+                <div className="flex justify-between items-center gap-2 border-t border-dashed pt-2 text-sm font-black text-indigo-950">
+                  <span className="truncate">{getBilingualString('totalPayable', receiptLang)}:</span>
+                  <span className="font-mono shrink-0">{currencySymbol}{selectedInvoice.total.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -733,7 +738,7 @@ export default function CustomerPortal({ customer, merchant, onSignOut, initialI
                 {/* Print and Translation options */}
                 <div className="flex gap-2">
                   <div className="bg-slate-900 p-0.5 rounded-lg border border-slate-800 flex">
-                     {(['en', 'ar', 'ur', 'hi', 'both'] as const).map((lang) => (
+                     {(['en', 'ar', 'ur', 'bn', 'hi', 'both'] as const).map((lang) => (
                       <button
                         key={lang}
                         onClick={() => setReceiptLang(lang)}
@@ -741,7 +746,7 @@ export default function CustomerPortal({ customer, merchant, onSignOut, initialI
                           receiptLang === lang ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                         }`}
                       >
-                        {lang === 'en' ? 'EN' : lang === 'ar' ? 'عربى' : lang === 'ur' ? 'اردو' : lang === 'hi' ? 'हिंदी' : 'Dual'}
+                        {lang === 'en' ? 'EN' : lang === 'ar' ? 'عربى' : lang === 'ur' ? 'اردو' : lang === 'bn' ? 'বাংলা' : lang === 'hi' ? 'हिंदी' : 'Dual'}
                       </button>
                     ))}
                   </div>

@@ -15,9 +15,23 @@ import {
   getSupportChats,
   addChatMessage,
   markChatAsRead,
-  getDashboardStats
+  getDashboardStats,
+  getRequireAdminApprovalSetting,
+  setRequireAdminApprovalSetting,
+  grantGuestPermanentAccess,
+  dismissGuestUpgradeRequest,
+  getCustomInvites,
+  createCustomInvite,
+  revokeCustomInvite,
+  deleteCustomInvite,
+  clearInactiveCustomInvites,
+  updateCustomInvite,
+  adminUpdateTenantAccessTime,
+  adminExtendTenantSubscription,
+  adminResetTenantPassword
 } from '../db';
-import { UserTenant, AccessLog, Customer } from '../types';
+import { UserTenant, AccessLog, Customer, CustomInvite, Language } from '../types';
+import { getBaseAppUrl, copyTextToClipboard, openExternalLink, buildWhatsAppLink, buildMailtoLink } from '../utils/links';
 import { 
   Shield, 
   Users, 
@@ -51,7 +65,19 @@ import {
   BarChart3,
   Share2,
   Copy,
-  Check
+  Check,
+  Crown,
+  Sparkles,
+  Link2,
+  ExternalLink,
+  Timer,
+  CalendarDays,
+  MailCheck,
+  Mail,
+  Phone,
+  Zap,
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 interface AdminModuleProps {
@@ -82,7 +108,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
   const [editTaxNumber, setEditTaxNumber] = useState('');
   const [editTaxRate, setEditTaxRate] = useState<number | string>(15);
   const [editCurrency, setEditCurrency] = useState<'AED' | 'USD' | 'PKR' | 'INR' | 'SAR' | 'EUR'>('SAR');
-  const [editLanguage, setEditLanguage] = useState<'en' | 'ar' | 'ur' | 'hi'>('en');
+  const [editLanguage, setEditLanguage] = useState<Language>('en');
   const [editInvoicePrefix, setEditInvoicePrefix] = useState('INV-');
   const [editInvoiceNotes, setEditInvoiceNotes] = useState('');
 
@@ -103,7 +129,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
   const [createPassword, setCreatePassword] = useState('');
   const [createCompanyName, setCreateCompanyName] = useState('');
   const [createCurrency, setCreateCurrency] = useState<'AED' | 'USD' | 'PKR' | 'INR' | 'SAR' | 'EUR'>('SAR');
-  const [createLanguage, setCreateLanguage] = useState<'en' | 'ar' | 'ur' | 'hi'>('en');
+  const [createLanguage, setCreateLanguage] = useState<Language>('en');
   const [createTaxRate, setCreateTaxRate] = useState<number | string>(15);
   const [createTaxNumber, setCreateTaxNumber] = useState('');
   const [createPhone, setCreatePhone] = useState('');
@@ -124,38 +150,308 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
   const [selectedChatUserEmail, setSelectedChatUserEmail] = useState<string | null>(null);
   const [adminChatText, setAdminChatText] = useState('');
   const [copiedSignup, setCopiedSignup] = useState(false);
+  const [copiedVisit, setCopiedVisit] = useState(false);
+  const [requireApproval, setRequireApproval] = useState<boolean>(() => getRequireAdminApprovalSetting());
 
-  const handleCopySignupLink = () => {
-    const signupUrl = `${window.location.origin}/?mode=register`;
-    
-    // Robust copy to clipboard
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(signupUrl);
-        setCopiedSignup(true);
-        setTimeout(() => setCopiedSignup(false), 2000);
-        return;
-      }
-    } catch (err) {
-      console.warn("Navigator clipboard blocked, using fallback", err);
+  // Custom Direct Invites & Link Generator states
+  const [customInvites, setCustomInvites] = useState<CustomInvite[]>([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteCompanyName, setInviteCompanyName] = useState('');
+  const [invitePhone, setInvitePhone] = useState('');
+  const [inviteDurationType, setInviteDurationType] = useState('permanent');
+  const [inviteCustomDate, setInviteCustomDate] = useState('');
+  const [inviteHoursStart, setInviteHoursStart] = useState('');
+  const [inviteHoursEnd, setInviteHoursEnd] = useState('');
+  const [lastCreatedInvite, setLastCreatedInvite] = useState<CustomInvite | null>(null);
+  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
+  const [inviteCreating, setInviteCreating] = useState(false);
+
+  // Tenant Access Time & Validity Control Modal states
+  const [timeModalTenant, setTimeModalTenant] = useState<UserTenant | null>(null);
+  const [showTimeModal, setShowTimeModal] = useState(false);
+  const [timeModalExpiry, setTimeModalExpiry] = useState('');
+  const [timeModalIsPermanent, setTimeModalIsPermanent] = useState(false);
+  const [timeModalHoursStart, setTimeModalHoursStart] = useState('');
+  const [timeModalHoursEnd, setTimeModalHoursEnd] = useState('');
+  const [timeModalSuspendedUntil, setTimeModalSuspendedUntil] = useState('');
+  const [timeModalStatus, setTimeModalStatus] = useState<'active' | 'inactive' | 'expired'>('active');
+  const [timeModalSubmitting, setTimeModalSubmitting] = useState(false);
+
+  const loadCustomInvitesData = () => {
+    setCustomInvites(getCustomInvites());
+  };
+
+  const handleGenerateCustomInvite = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) {
+      alert("Please enter target email address for this invite.");
+      return;
     }
+    setInviteCreating(true);
+    const newInv = createCustomInvite({
+      email: inviteEmail.trim(),
+      companyName: inviteCompanyName.trim() || undefined,
+      phone: invitePhone.trim() || undefined,
+      durationType: inviteDurationType,
+      customDate: inviteCustomDate || undefined,
+      allowedHoursStart: inviteHoursStart || undefined,
+      allowedHoursEnd: inviteHoursEnd || undefined
+    });
+    setInviteCreating(false);
+    setLastCreatedInvite(newInv);
+    loadCustomInvitesData();
+    setSuccessMsg(`⚡ Generated custom direct invite link for "${newInv.email}" (${newInv.durationLabel})!`);
+    setTimeout(() => setSuccessMsg(''), 5000);
+  };
 
-    try {
-      const textArea = document.createElement("textarea");
-      textArea.value = signupUrl;
-      textArea.style.top = "0";
-      textArea.style.left = "0";
-      textArea.style.position = "fixed";
-      textArea.style.opacity = "0";
-      document.body.appendChild(textArea);
-      textArea.focus();
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
+  const handleCopyCustomInviteLink = async (inviteId: string) => {
+    const link = `${getBaseAppUrl()}/?inviteToken=${inviteId}`;
+    const success = await copyTextToClipboard(link);
+    if (success) {
+      setCopiedInviteId(inviteId);
+      setSuccessMsg("✓ Invite link copied to clipboard!");
+      setTimeout(() => {
+        setCopiedInviteId(null);
+        setSuccessMsg('');
+      }, 2500);
+    }
+  };
+
+  const handleRevokeCustomInvite = (inviteId: string) => {
+    revokeCustomInvite(inviteId);
+    loadCustomInvitesData();
+    setSuccessMsg("🚫 Invite token revoked successfully.");
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
+
+  const handleDeleteCustomInvite = (inviteId: string) => {
+    deleteCustomInvite(inviteId);
+    loadCustomInvitesData();
+    if (lastCreatedInvite?.id === inviteId) {
+      setLastCreatedInvite(null);
+    }
+    setSuccessMsg("🗑️ Invite link deleted permanently from database.");
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
+
+  const handleClearInactiveInvites = () => {
+    const count = clearInactiveCustomInvites();
+    loadCustomInvitesData();
+    if (lastCreatedInvite && (lastCreatedInvite.status === 'revoked' || (lastCreatedInvite.expiresAt && new Date(lastCreatedInvite.expiresAt).getTime() < Date.now()))) {
+      setLastCreatedInvite(null);
+    }
+    setSuccessMsg(`🧹 Cleaned up ${count} inactive/expired custom invite link(s).`);
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
+
+  const handleOpenTimeModal = (tenant: UserTenant) => {
+    setTimeModalTenant(tenant);
+    setTimeModalExpiry(tenant.subscriptionExpiry || '');
+    setTimeModalIsPermanent(!tenant.subscriptionExpiry && !tenant.isGuestPass);
+    setTimeModalHoursStart(tenant.allowedHoursStart || '');
+    setTimeModalHoursEnd(tenant.allowedHoursEnd || '');
+    setTimeModalSuspendedUntil(tenant.tempSuspendedUntil || '');
+    setTimeModalStatus(tenant.subscriptionStatus || (tenant.isActive !== false ? 'active' : 'inactive'));
+    setShowTimeModal(true);
+  };
+
+  const handleQuickExtendTenant = (extension: '24h' | '7d' | '30d' | '90d' | '180d' | '365d' | 'permanent') => {
+    if (!timeModalTenant) return;
+    setTimeModalSubmitting(true);
+    const updated = adminExtendTenantSubscription(timeModalTenant.id, extension);
+    setTimeModalSubmitting(false);
+    if (updated) {
+      setTimeModalTenant(updated);
+      setTimeModalExpiry(updated.subscriptionExpiry || '');
+      setTimeModalIsPermanent(!updated.subscriptionExpiry);
+      setTimeModalStatus('active');
+      loadTenants();
+      setSuccessMsg(`✓ Successfully adjusted access for "${updated.companyName}"! Expiry: ${updated.subscriptionExpiry || 'Permanent / Lifetime'}`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    }
+  };
+
+  const handleSaveTimeModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!timeModalTenant) return;
+    setTimeModalSubmitting(true);
+    const updated = adminUpdateTenantAccessTime(timeModalTenant.id, {
+      subscriptionExpiry: timeModalIsPermanent ? undefined : (timeModalExpiry || undefined),
+      isPermanent: timeModalIsPermanent,
+      allowedHoursStart: timeModalHoursStart || undefined,
+      allowedHoursEnd: timeModalHoursEnd || undefined,
+      tempSuspendedUntil: timeModalSuspendedUntil || undefined,
+      subscriptionStatus: timeModalStatus,
+      isActive: timeModalStatus !== 'inactive'
+    });
+    setTimeModalSubmitting(false);
+    if (updated) {
+      loadTenants();
+      setShowTimeModal(false);
+      setSuccessMsg(`✓ Updated access validity and time controls for "${updated.companyName}" successfully!`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    }
+  };
+
+  const handleToggleRequireApproval = (val: boolean) => {
+    setRequireApproval(val);
+    setRequireAdminApprovalSetting(val);
+    setSuccessMsg(
+      val
+        ? '🔒 Super Admin Approval is now REQUIRED for all new permanent registrations.'
+        : '⚡ Instant Auto-Approval is now enabled for all new registrations.'
+    );
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
+
+  const handleApproveTenantQuick = (tenant: UserTenant) => {
+    const updated: UserTenant = {
+      ...tenant,
+      isApproved: true,
+      isActive: true,
+    };
+    adminUpdateTenant(updated);
+    loadTenants();
+    loadAccessLogsData();
+    onRefreshStats();
+    setSuccessMsg(`✓ Approved registration for "${tenant.companyName}" (${tenant.email})! Workspace is now unlocked.`);
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
+
+  const handleRejectTenantQuick = (tenant: UserTenant) => {
+    const action = window.confirm(
+      `Reject Registration Request?\n\nCompany: ${tenant.companyName}\nEmail: ${tenant.email}\n\nClick OK to Reject & Remove this registration request, or Cancel to keep pending.`
+    );
+    if (action) {
+      adminDeleteTenant(tenant.id);
+      loadTenants();
+      loadAccessLogsData();
+      onRefreshStats();
+      setSuccessMsg(`🚫 Registration request for "${tenant.companyName}" (${tenant.email}) has been rejected and removed.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    }
+  };
+
+  const handleDenyAndBlockTenant = (tenant: UserTenant) => {
+    const updated: UserTenant = {
+      ...tenant,
+      isApproved: false,
+      isActive: false,
+    };
+    adminUpdateTenant(updated);
+    loadTenants();
+    loadAccessLogsData();
+    onRefreshStats();
+    setSuccessMsg(`🚫 Access denied and blocked for "${tenant.companyName}" (${tenant.email}).`);
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
+
+  const handleQuickResetPassword = (tenant: UserTenant) => {
+    const newPass = window.prompt(
+      `🔑 Reset Password for:\nCompany: ${tenant.companyName}\nEmail: ${tenant.email}\n\nCurrent Password: ${tenant.passwordSha || 'N/A'}\n\nEnter new password:`,
+      tenant.passwordSha || 'pass123'
+    );
+    if (newPass && newPass.trim()) {
+      adminResetTenantPassword(tenant.id, newPass.trim());
+      loadTenants();
+      setSuccessMsg(`✓ Password updated successfully for "${tenant.email}"! New password: ${newPass.trim()}`);
+      setTimeout(() => setSuccessMsg(''), 5000);
+    }
+  };
+
+  const handleToggleRoleQuick = (tenant: UserTenant) => {
+    const nextRole = tenant.role === 'admin' ? 'user' : 'admin';
+    const updated: UserTenant = {
+      ...tenant,
+      role: nextRole
+    };
+    adminUpdateTenant(updated);
+    loadTenants();
+    setSuccessMsg(`✓ Role updated for "${tenant.email}" to: ${nextRole.toUpperCase()}`);
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
+
+  const handleRejectCustomerQuick = (customerId: string) => {
+    const cust = customers.find(c => c.id === customerId);
+    if (!cust) return;
+    const action = window.confirm(`Reject customer registration for "${cust.name}" (${cust.email})?`);
+    if (action) {
+      const updated = customers.filter(c => c.id !== customerId);
+      localStorage.setItem('biz_suite_customers', JSON.stringify(updated));
+      loadCustomersData();
+      onRefreshStats();
+      setSuccessMsg(`🚫 Customer registration for "${cust.name}" has been rejected.`);
+      setTimeout(() => setSuccessMsg(''), 3500);
+    }
+  };
+
+  const handleApproveAllPending = () => {
+    const all = getTenants();
+    let count = 0;
+    all.forEach(t => {
+      if (t.isApproved === false) {
+        t.isApproved = true;
+        t.isActive = true;
+        adminUpdateTenant(t);
+        count++;
+      }
+    });
+    const allCust = getCustomersGlobal();
+    allCust.forEach(c => {
+      if (c.isApproved === false) {
+        c.isApproved = true;
+        count++;
+      }
+    });
+    localStorage.setItem('biz_suite_customers', JSON.stringify(allCust));
+    loadTenants();
+    loadCustomersData();
+    onRefreshStats();
+    setSuccessMsg(`✓ Approved all ${count} pending registration(s)!`);
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
+
+  const handleGrantGuestPermanent = (tenant: UserTenant) => {
+    const updated = grantGuestPermanentAccess(tenant.id);
+    if (updated) {
+      loadTenants();
+      loadAccessLogsData();
+      onRefreshStats();
+      setSuccessMsg(`🎉 Granted permanent access to "${tenant.companyName}" (${tenant.email})! All invoices and sandbox data converted to permanent storage.`);
+      setTimeout(() => setSuccessMsg(''), 5000);
+    }
+  };
+
+  const handleDismissGuestUpgrade = (tenant: UserTenant) => {
+    dismissGuestUpgradeRequest(tenant.id);
+    loadTenants();
+    setSuccessMsg(`Dismissed upgrade request for "${tenant.companyName}".`);
+    setTimeout(() => setSuccessMsg(''), 3500);
+  };
+
+  const handleCopySignupLink = async () => {
+    const signupUrl = `${getBaseAppUrl()}/?mode=register`;
+    const success = await copyTextToClipboard(signupUrl);
+    if (success) {
       setCopiedSignup(true);
-      setTimeout(() => setCopiedSignup(false), 2000);
-    } catch (err) {
-      console.error("Fallback copy failed:", err);
+      setSuccessMsg("✓ Registration signup link copied to clipboard!");
+      setTimeout(() => {
+        setCopiedSignup(false);
+        setSuccessMsg('');
+      }, 2500);
+    }
+  };
+
+  const handleCopyVisitLink = async () => {
+    const visitUrl = `${getBaseAppUrl()}/?mode=visit`;
+    const success = await copyTextToClipboard(visitUrl);
+    if (success) {
+      setCopiedVisit(true);
+      setSuccessMsg("✓ 24-Hour Guest Trial link copied to clipboard!");
+      setTimeout(() => {
+        setCopiedVisit(false);
+        setSuccessMsg('');
+      }, 2500);
     }
   };
 
@@ -165,19 +461,28 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
       if (saved) {
         return JSON.parse(saved);
       }
-      // On first mount if empty, pre-populate with existing customer IDs so they are not treated as fresh alerts
-      const currentIds = getCustomersGlobal().map(c => c.id);
-      localStorage.setItem('biz_suite_acknowledged_customer_ids', JSON.stringify(currentIds));
-      return currentIds;
+      return [];
     } catch {
       return [];
     }
   });
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem('biz_suite_acknowledged_customer_ids');
+      if (!saved) {
+        const currentIds = getCustomersGlobal().map(c => c.id);
+        localStorage.setItem('biz_suite_acknowledged_customer_ids', JSON.stringify(currentIds));
+        setAcknowledgedIds(currentIds);
+      }
+    } catch {
+      // ignore
+    }
+
     loadTenants();
     loadAccessLogsData();
     loadCustomersData();
+    loadCustomInvitesData();
 
     // Fetch live session instances immediately and bind a periodic pinger to fetch local storage updates (auto-synced with cloud server in App.tsx)
     setActiveSessions(getActiveSessions());
@@ -186,6 +491,7 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
       setAccessLogs(getAccessLogs());
       setCustomers(getCustomersGlobal());
       setTenants(getTenants());
+      setCustomInvites(getCustomInvites());
     }, 4000);
     return () => clearInterval(sessPinger);
   }, []);
@@ -431,18 +737,6 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
     setTimeout(() => setSuccessMsg(''), 4500);
   };
 
-  const handleApproveTenantQuick = (t: UserTenant) => {
-    const updated: UserTenant = {
-      ...t,
-      isApproved: true
-    };
-    adminUpdateTenant(updated);
-    loadTenants();
-    setSuccessMsg(`Approved business workspace for "${t.companyName}" successfully.`);
-    onRefreshStats();
-    setTimeout(() => setSuccessMsg(''), 4500);
-  };
-
   const handleDeleteTenantQuick = (t: UserTenant) => {
     if (window.confirm(`⚠️ EXTREME ACTION: Are you sure you want to completely PURGE and delete "${t.companyName}" (ID: ${t.id})? All invoices, inventory, and databases under this namespace will be permanently lost!`)) {
       adminDeleteTenant(t.id);
@@ -473,6 +767,9 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
   const activeSubs = tenants.filter(t => (t.subscriptionStatus === 'active' || !t.subscriptionStatus) && t.isActive !== false).length;
   const deactivatedCount = tenants.filter(t => t.isActive === false).length;
   const adminCount = tenants.filter(t => t.role === 'admin').length;
+  const pendingTenants = tenants.filter(t => t.isApproved === false);
+  const pendingCustomers = customers.filter(c => c.isApproved === false);
+  const totalPending = pendingTenants.length + pendingCustomers.length;
 
   // Filter & search implementation
   const filtered = tenants.filter(t => {
@@ -749,64 +1046,79 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
       </div>
 
       {/* Tab Selectors */}
-      <div className="flex border-b border-indigo-950 gap-2 font-mono scrollbar-none overflow-x-auto">
+      <div className="flex border-b border-indigo-950/80 gap-1.5 font-mono scrollbar-none overflow-x-auto py-1 px-1 -mx-1 sm:mx-0 shrink-0 touch-pan-x select-none">
         <button
+          type="button"
           onClick={() => {
             setActiveTab('unifiedUsers');
             loadCustomersData();
             loadTenants();
           }}
-          className={`pb-3 px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+          className={`py-2.5 px-3.5 sm:px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap min-h-[42px] rounded-t-lg ${
             activeTab === 'unifiedUsers'
-              ? 'border-indigo-500 text-white font-extrabold bg-indigo-950/10'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
+              ? 'border-indigo-500 text-white font-extrabold bg-indigo-950/40'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
         >
-          <Fingerprint className="w-4 h-4 text-emerald-400 animate-pulse" />
-          Command Center: Central Users
+          <Users className="w-4 h-4 text-emerald-400" />
+          <span>Users & Registrations (صارفین کی فہرست)</span>
+          {totalPending > 0 && (
+            <span className="ml-1.5 px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[9px] animate-bounce">
+              ⏳ {totalPending} PENDING
+            </span>
+          )}
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('businesses')}
-          className={`pb-3 px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+          className={`py-2.5 px-3.5 sm:px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap min-h-[42px] rounded-t-lg ${
             activeTab === 'businesses'
-              ? 'border-indigo-500 text-white font-extrabold font-mono'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
+              ? 'border-indigo-500 text-white font-extrabold bg-indigo-950/40 font-mono'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
         >
           <Building2 className="w-4 h-4 text-indigo-400" />
-          Businesses Workspace Directory
+          <span>Businesses Directory</span>
+          {pendingTenants.length > 0 && (
+            <span className="ml-1.5 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-[9px]">
+              {pendingTenants.length} Pending
+            </span>
+          )}
         </button>
         <button
+          type="button"
           onClick={() => {
             setActiveTab('customers');
             loadCustomersData();
           }}
-          className={`pb-3 px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+          className={`py-2.5 px-3.5 sm:px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap min-h-[42px] rounded-t-lg ${
             activeTab === 'customers'
-              ? 'border-indigo-500 text-white font-extrabold'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
+              ? 'border-indigo-500 text-white font-extrabold bg-indigo-950/40'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
         >
           <Users className="w-4 h-4 text-sky-400" />
-          Registered Customers Directory
+          <span>Customers Directory</span>
         </button>
         <button
+          type="button"
           onClick={() => {
             setActiveTab('accessLogs');
             loadAccessLogsData();
           }}
-          className={`pb-3 px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+          className={`py-2.5 px-3.5 sm:px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap min-h-[42px] rounded-t-lg ${
             activeTab === 'accessLogs'
-              ? 'border-indigo-500 text-white font-extrabold'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
+              ? 'border-indigo-500 text-white font-extrabold bg-indigo-950/40'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
         >
           <Activity className="w-4 h-4 text-emerald-400" />
-          Live Access Control Logs
+          <span>Access Logs</span>
         </button>
 
         {/* Live Admin Support Desk */}
         <button
+          type="button"
           onClick={() => {
             setActiveTab('chats');
             const chatsList = getSupportChats();
@@ -818,14 +1130,14 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
               setSelectedChatUserEmail(chatsList[0].senderEmail === 'irfanksaeed@gmail.com' ? chatsList[0].receiverEmail : chatsList[0].senderEmail);
             }
           }}
-          className={`pb-3 px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative ${
+          className={`py-2.5 px-3.5 sm:px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap min-h-[42px] rounded-t-lg relative ${
             activeTab === 'chats'
-              ? 'border-indigo-500 text-white font-extrabold'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
+              ? 'border-indigo-500 text-white font-extrabold bg-indigo-950/40'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
         >
           <MessageCircle className="w-4 h-4 text-pink-400" />
-          Live Chat Support Desk
+          <span>Support Desk</span>
           {getSupportChats().filter(chat => chat.receiverEmail === 'irfanksaeed@gmail.com' && !chat.isRead).length > 0 && (
             <span className="ml-1.5 px-1.5 py-0.5 bg-rose-500 rounded-full font-black text-[9px] text-white animate-bounce">
               {getSupportChats().filter(chat => chat.receiverEmail === 'irfanksaeed@gmail.com' && !chat.isRead).length}
@@ -835,15 +1147,16 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
 
         {/* Dynamic ERP Reports & Metrics */}
         <button
+          type="button"
           onClick={() => setActiveTab('reports')}
-          className={`pb-3 px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+          className={`py-2.5 px-3.5 sm:px-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap min-h-[42px] rounded-t-lg ${
             activeTab === 'reports'
-              ? 'border-indigo-500 text-white font-extrabold'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
+              ? 'border-indigo-500 text-white font-extrabold bg-indigo-950/40'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
         >
           <BarChart3 className="w-4 h-4 text-amber-500" />
-          Platform Reports
+          <span>Platform Reports</span>
         </button>
       </div>
 
@@ -903,63 +1216,954 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
             </div>
           </div>
 
-          {/* SHARE REGISTER INVITE LINK SECTION (BILINGUAL) */}
-          <div className="bg-gradient-to-r from-indigo-950/75 via-slate-900 to-indigo-950/75 border border-indigo-500/30 p-5 rounded-2xl shadow-xl space-y-4 animate-fadeIn">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div className="space-y-1 w-full md:w-3/4">
-                <div className="flex items-center gap-2 text-indigo-400">
-                  <Share2 className="w-5 h-5 text-indigo-400 animate-pulse" />
-                  <span className="font-extrabold text-xs tracking-wider uppercase bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 font-mono">
-                    Share SignUp Invite / مشاركة رابط التسجيل
+          {/* SUPER ADMIN ACCESS GATE & APPROVAL POLICY MANAGEMENT CARD */}
+          {(() => {
+            const pendingTenants = tenants.filter(t => t.isApproved === false);
+            const pendingCustomers = customers.filter(c => c.isApproved === false);
+            const totalPending = pendingTenants.length + pendingCustomers.length;
+
+            return (
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950/70 to-slate-900 border border-indigo-500/40 p-5 rounded-2xl shadow-2xl space-y-4 animate-fadeIn">
+                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-3 border-b border-indigo-950/60">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-5 h-5 text-indigo-400" />
+                      <h3 className="text-white font-black text-sm tracking-tight flex items-center gap-2">
+                        Super Admin Access Gate & Permission Policies (سپر ایڈمن منظوری اور کنٹرول)
+                      </h3>
+                    </div>
+                    <p className="text-xs text-slate-300">
+                      نئے مستقل لنکس کے لیے منظوری کی پالیسی اور ہر اکاؤنٹ کو بلاک یا ان بلاک کرنے کے مکمل اختیارات۔
+                    </p>
+                  </div>
+
+                  {/* Toggle switch for require approval */}
+                  <div className="flex items-center gap-3 bg-black/50 px-4 py-2 rounded-xl border border-indigo-500/30">
+                    <div className="text-right">
+                      <span className="text-[11px] font-bold text-white block">
+                        Require Approval for Permanent Link
+                      </span>
+                      <span className="text-[9.5px] text-indigo-300 font-medium">
+                        {requireApproval ? '🔒 Strict Mode (ایڈمن منظوری ضروری ہے)' : '⚡ Auto-Approve (فوری خودکار منظوری)'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleRequireApproval(!requireApproval)}
+                      className={`relative inline-flex h-6 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        requireApproval ? 'bg-indigo-600' : 'bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                          requireApproval ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Pending Approvals Notice Banner and Itemized List */}
+                {totalPending > 0 ? (
+                  <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/70 border border-amber-500/50 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-2xl font-bold border border-amber-500/40 shrink-0">
+                          ⏳
+                        </div>
+                        <div>
+                          <div className="text-sm sm:text-base font-black text-amber-300 uppercase tracking-wide font-mono flex items-center gap-2 flex-wrap">
+                            <span>{totalPending} New Registration Request(s) Awaiting Approval</span>
+                            <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black animate-pulse">
+                              ACTION REQUIRED
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-300 mt-1">
+                            Review new registrations below. You have full authority to <strong>Approve</strong> or <strong>Reject / Deny</strong> each account.
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleApproveAllPending}
+                        className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg cursor-pointer shrink-0 flex items-center justify-center gap-2"
+                      >
+                        <span>⚡</span> Approve All ({totalPending}) Requests
+                      </button>
+                    </div>
+
+                    {/* Pending Businesses List */}
+                    {pendingTenants.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="text-xs font-black uppercase tracking-wider text-amber-400 font-mono px-1 flex items-center gap-2">
+                          <Building2 className="w-4 h-4 text-amber-400" />
+                          <span>Pending Business Registrations ({pendingTenants.length})</span>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {pendingTenants.map(tenant => {
+                            const waApprovalNotice = encodeURIComponent(
+                              `Salam ${tenant.companyName}!\n\nYour ERP Workspace on Biz Suite has been APPROVED by Super Admin Irfan Saeed.\n\nYou can now log in to your account here:\n${window.location.origin}/?autologin=${encodeURIComponent(tenant.email)}\n\nWelcome aboard!`
+                            );
+                            const waRejectNotice = encodeURIComponent(
+                              `Salam ${tenant.companyName}!\n\nThis is regarding your registration request on Biz Suite ERP. Please contact Super Admin Irfan Saeed for verification.`
+                            );
+                            const cleanPhone = (tenant.phone || '').replace(/[^\d+]/g, '');
+
+                            return (
+                              <div
+                                key={tenant.id}
+                                className="bg-slate-950/95 border border-amber-500/40 rounded-2xl p-4 sm:p-5 space-y-3.5 relative overflow-hidden shadow-xl hover:border-amber-500/70 transition"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0 space-y-1">
+                                    <div className="font-black text-white text-base flex items-center gap-2 flex-wrap">
+                                      <span className="truncate">{tenant.companyName}</span>
+                                      <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] px-2 py-0.5 rounded-full font-mono font-bold uppercase">
+                                        Pending Approval
+                                      </span>
+                                    </div>
+
+                                    {/* Registered Email with Copy button & mailto */}
+                                    <div className="flex items-center gap-2 pt-0.5">
+                                      <span className="text-xs text-indigo-300 font-mono font-bold select-all bg-indigo-950/50 px-2 py-0.5 rounded border border-indigo-900/40 truncate">
+                                        ✉️ {tenant.email}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(tenant.email);
+                                          setSuccessMsg(`Copied email: ${tenant.email}`);
+                                          setTimeout(() => setSuccessMsg(''), 2000);
+                                        }}
+                                        className="p-1 text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 rounded text-[10px] transition cursor-pointer"
+                                        title="Copy Email Address"
+                                      >
+                                        <Copy className="w-3 h-3" />
+                                      </button>
+                                      <a
+                                        href={`mailto:${tenant.email}?subject=Biz Suite ERP Account Registration Approval&body=Salam ${tenant.companyName},`}
+                                        className="p-1 text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 rounded text-[10px] transition"
+                                        title="Send Email"
+                                      >
+                                        <Mail className="w-3 h-3" />
+                                      </a>
+                                    </div>
+
+                                    {/* Phone / Mobile */}
+                                    {tenant.phone && (
+                                      <div className="text-xs text-emerald-400 font-mono flex items-center gap-1.5 pt-0.5">
+                                        <span>📱 Mobile:</span>
+                                        <strong className="select-all font-bold">{tenant.phone}</strong>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <span className="text-[10px] text-slate-500 font-mono bg-slate-900 px-2 py-1 rounded border border-slate-800 shrink-0">
+                                    ID: {tenant.id}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 text-xs text-slate-400 bg-slate-900/60 p-2.5 rounded-xl border border-white/5 font-mono">
+                                  <div>
+                                    <span className="text-slate-500 block text-[9px] uppercase font-bold">Registered Date</span>
+                                    <span className="text-slate-200 font-medium">{tenant.createdAt || 'Recent'}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-500 block text-[9px] uppercase font-bold">Currency / Language</span>
+                                    <span className="text-slate-200 font-medium">{tenant.currency || 'USD'} / {(tenant.language || 'en').toUpperCase()}</span>
+                                  </div>
+                                </div>
+
+                                {/* Decision Options in English */}
+                                <div className="space-y-2 pt-1">
+                                  <div className="text-[10px] font-mono font-bold text-slate-400 uppercase">
+                                    Admin Decision: Approve or Reject
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {/* Approve Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleApproveTenantQuick(tenant)}
+                                      className="flex-1 py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-black text-xs uppercase tracking-wider rounded-xl transition shadow-md cursor-pointer flex items-center justify-center gap-1.5 min-w-[120px]"
+                                      title="Approve this registration and grant full ERP access"
+                                    >
+                                      <CheckCircle2 className="w-4 h-4 text-white" />
+                                      <span>✓ Approve Access</span>
+                                    </button>
+
+                                    {/* Reject / Deny Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRejectTenantQuick(tenant)}
+                                      className="py-2.5 px-3.5 bg-rose-950/80 hover:bg-rose-900 text-rose-200 hover:text-white border border-rose-800/60 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+                                      title="Reject & delete registration request"
+                                    >
+                                      <XCircle className="w-4 h-4 text-rose-300" />
+                                      <span>✕ Reject / Deny</span>
+                                    </button>
+
+                                    {/* WhatsApp Direct Contact Button */}
+                                    {cleanPhone ? (
+                                      <a
+                                        href={`https://wa.me/${cleanPhone}?text=${waApprovalNotice}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="py-2.5 px-3 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 hover:text-white border border-emerald-900/60 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                                        title="Chat on WhatsApp"
+                                      >
+                                        <MessageCircle className="w-4 h-4 text-emerald-300" />
+                                        <span>WhatsApp</span>
+                                      </a>
+                                    ) : (
+                                      <a
+                                        href={`https://wa.me/?text=${encodeURIComponent(`Salam ${tenant.companyName}! This is Super Admin Irfan Saeed regarding your Biz Suite ERP registration (${tenant.email}).`)}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                                        title="Share on WhatsApp"
+                                      >
+                                        <MessageCircle className="w-4 h-4 text-slate-300" />
+                                        <span>WhatsApp</span>
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Pending Customers List */}
+                    {pendingCustomers.length > 0 && (
+                      <div className="space-y-3 pt-2">
+                        <div className="text-xs font-black uppercase tracking-wider text-sky-400 font-mono px-1 flex items-center gap-2">
+                          <Users className="w-4 h-4 text-sky-400" />
+                          <span>Pending Customer Portal Users ({pendingCustomers.length})</span>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {pendingCustomers.map(customer => {
+                            const matchedTenant = tenants.find(t => t.id === customer.tenantId);
+                            const storeBrand = matchedTenant ? matchedTenant.companyName : 'Merchant';
+
+                            return (
+                              <div
+                                key={customer.id}
+                                className="bg-slate-950/95 border border-sky-500/40 rounded-2xl p-4 sm:p-5 space-y-3.5 relative overflow-hidden shadow-xl"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0 space-y-1">
+                                    <div className="font-black text-white text-base flex items-center gap-2 flex-wrap">
+                                      <span className="truncate">{customer.name}</span>
+                                      <span className="bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] px-2 py-0.5 rounded-full font-mono font-bold">
+                                        Customer User
+                                      </span>
+                                    </div>
+                                    <div className="text-xs text-indigo-300 font-mono font-bold select-all bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-900/30">
+                                      ✉️ {customer.email}
+                                    </div>
+                                    {customer.phone && (
+                                      <div className="text-xs text-emerald-400 font-mono">
+                                        📱 {customer.phone}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] text-slate-500 font-mono bg-slate-900 px-2 py-1 rounded border border-slate-800 shrink-0">
+                                    Store: {storeBrand}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleCustomerApprovalGlobal(customer.id)}
+                                    className="flex-1 py-2.5 bg-gradient-to-r from-sky-600 to-sky-700 hover:from-sky-500 hover:to-sky-600 text-white font-black text-xs uppercase tracking-wider rounded-xl transition shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+                                  >
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>✓ Approve Customer Access</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRejectCustomerQuick(customer.id)}
+                                    className="py-2.5 px-3.5 bg-rose-950/80 hover:bg-rose-900 text-rose-200 hover:text-white border border-rose-800/60 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+                                  >
+                                    <XCircle className="w-4 h-4 text-rose-300" />
+                                    <span>✕ Reject</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-slate-400">
+                    <span className="flex items-center gap-2 text-emerald-400 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      All accounts are approved. No pending registration requests in queue.
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      Strict Gate Policy is ACTIVE: All new business registrations will appear here for your approval.
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* 24-HOUR VISITOR PERMANENT UPGRADE REQUESTS SECTION */}
+          {(() => {
+            const guestUpgradeRequests = tenants.filter(t => t.guestUpgradeRequested);
+            
+            return (
+              <div className="bg-gradient-to-r from-slate-900 via-amber-950/40 to-slate-900 border border-amber-500/40 p-5 rounded-2xl shadow-2xl space-y-4 animate-fadeIn">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-amber-950/60">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🌟</span>
+                      <h3 className="text-white font-black text-sm tracking-tight flex items-center gap-2">
+                        24-Hour Visitor Upgrade Requests (24 گھنٹے والے وزیٹرز کی مستقل رسائی کی درخواستیں)
+                      </h3>
+                      {guestUpgradeRequests.length > 0 && (
+                        <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] font-black rounded-full animate-bounce">
+                          {guestUpgradeRequests.length} NEW
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-300">
+                      24 گھنٹے کے ٹرائل وزیٹرز جنہوں نے تمام ڈیٹا سمیت مستقل اکاؤنٹ کی اجازت طلب کی ہے۔
+                    </p>
+                  </div>
+                </div>
+
+                {guestUpgradeRequests.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {guestUpgradeRequests.map((tenant) => (
+                        <div 
+                          key={tenant.id}
+                          className="bg-slate-950/80 border border-amber-500/30 rounded-xl p-4 space-y-3 relative overflow-hidden"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="font-extrabold text-white text-sm flex items-center gap-2">
+                                {tenant.companyName}
+                                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] px-2 py-0.5 rounded-full font-bold">
+                                  24h Trial
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-300 font-mono mt-0.5">{tenant.email}</div>
+                              {tenant.phone && (
+                                <div className="text-[11px] text-emerald-400 font-mono mt-0.5 flex items-center gap-1">
+                                  <span>📱 WhatsApp/Phone:</span>
+                                  <strong>{tenant.phone}</strong>
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-[9px] text-slate-500 font-mono bg-slate-900 px-2 py-1 rounded">
+                              {tenant.guestUpgradeRequestedAt ? new Date(tenant.guestUpgradeRequestedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
+                            </span>
+                          </div>
+
+                          {tenant.guestUpgradeNotes && (
+                            <div className="bg-slate-900/90 p-2.5 rounded-lg border border-white/5 text-xs text-slate-300 italic">
+                              "{tenant.guestUpgradeNotes}"
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleGrantGuestPermanent(tenant)}
+                              className="flex-1 py-2 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-black text-xs uppercase tracking-wider rounded-lg transition shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              <span>👑</span> Grant Permanent Access (مستقل کریں)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onImpersonate(tenant)}
+                              className="px-3 py-2 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 hover:text-white border border-indigo-900/50 rounded-lg text-xs font-bold transition cursor-pointer"
+                              title="Check user invoices and data"
+                            >
+                              👀 View Data
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDismissGuestUpgrade(tenant)}
+                              className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg text-xs transition cursor-pointer"
+                              title="Dismiss request"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-950/40 border border-slate-800/80 p-3 rounded-xl flex items-center justify-between text-xs text-slate-400">
+                    <span className="flex items-center gap-2 text-slate-300">
+                      <span>⏱️</span>
+                      فی الوقت کوئی نئی وزٹر درخواست موصول نہیں ہوئی۔ وزیٹر کے ٹاپ بینر پر ریکویسٹ کا آپشن موجود ہے۔
+                    </span>
+                    <span className="text-[10px] text-amber-400 font-mono">
+                      Guest Pass Expiration: 24 Hours
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* SHARE INVITE & GUEST VISIT LINKS SECTION */}
+          <div className="space-y-6 animate-fadeIn">
+            {/* 1. Super Admin Custom Direct Invite Generator (Full Control with Email & Duration) */}
+            <div className="bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/40 p-6 rounded-3xl shadow-2xl space-y-6">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-indigo-500/20">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                      <Zap className="w-5 h-5 text-indigo-400" />
+                    </span>
+                    <h3 className="text-base font-black text-white tracking-tight flex items-center gap-2">
+                      Custom Direct Invite Generator & Duration Controller
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-300 font-urdu leading-relaxed">
+                    نئے ٹیننٹ کی ای میل درج کریں اور رسائی کی مدت (24 گھنٹے، 7 دن، 30 دن، 1 سال یا مستقل) مقرر کر کے مخصوص ڈائریکٹ لنک بنائیں
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[11px] font-bold text-amber-300 font-mono flex items-center gap-1.5">
+                    <Crown className="w-3.5 h-3.5 text-amber-400" />
+                    Super Admin Control
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                  <div>
-                    <h4 className="text-white font-bold text-sm">📢 Registration Invite Link (English)</h4>
-                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
-                      Share this short registration link. It allows new business owners to register their own clean, separate, isolated workspace. Their calculations and database tables will remain strictly separate and will not mix with anyone else.
-                    </p>
+              </div>
+
+              {/* Generator Form */}
+              <form onSubmit={handleGenerateCustomInvite} className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                <div className="space-y-1.5 md:col-span-1 lg:col-span-2">
+                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-indigo-400" />
+                    Target Tenant Email * (ٹیننٹ کی ای میل)
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="tenant@business.com"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="w-full bg-black/50 border border-indigo-900/60 focus:border-indigo-400 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-400" />
+                    Company Name (کمپنی کا نام)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="E.g. Al-Madina Trading"
+                    value={inviteCompanyName}
+                    onChange={(e) => setInviteCompanyName(e.target.value)}
+                    className="w-full bg-black/50 border border-indigo-900/60 focus:border-indigo-400 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5 text-indigo-400" />
+                    Mobile / WhatsApp
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="+923001234567"
+                    value={invitePhone}
+                    onChange={(e) => setInvitePhone(e.target.value)}
+                    className="w-full bg-black/50 border border-indigo-900/60 focus:border-indigo-400 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                    <Timer className="w-3.5 h-3.5 text-amber-400" />
+                    Access Duration * (رسائی کی مدت)
+                  </label>
+                  <select
+                    value={inviteDurationType}
+                    onChange={(e) => setInviteDurationType(e.target.value)}
+                    className="w-full bg-black/70 border border-amber-500/40 focus:border-amber-400 rounded-xl px-3 py-2.5 text-xs text-amber-200 outline-none font-bold"
+                  >
+                    <option value="permanent" className="bg-slate-900 text-amber-300">👑 Lifetime / Permanent (ہمیشہ کے لیے)</option>
+                    <option value="24h" className="bg-slate-900 text-white">⏱️ 24 Hours (24 گھنٹے)</option>
+                    <option value="3d" className="bg-slate-900 text-white">📅 3 Days (3 دن)</option>
+                    <option value="7d" className="bg-slate-900 text-white">📅 7 Days (1 ہفتہ)</option>
+                    <option value="15d" className="bg-slate-900 text-white">📅 15 Days (15 دن)</option>
+                    <option value="30d" className="bg-slate-900 text-white">📅 30 Days (1 مہینہ)</option>
+                    <option value="90d" className="bg-slate-900 text-white">📅 90 Days (3 مہینے)</option>
+                    <option value="180d" className="bg-slate-900 text-white">📅 180 Days (6 مہینے)</option>
+                    <option value="365d" className="bg-slate-900 text-white">📅 365 Days (1 سال)</option>
+                    <option value="custom" className="bg-slate-900 text-indigo-300">🗓️ Specific Expiry Date (تاریخ مقرر کریں)</option>
+                  </select>
+                </div>
+
+                {inviteDurationType === 'custom' && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                      <CalendarDays className="w-3.5 h-3.5 text-indigo-400" />
+                      Specific Expiry Date *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={inviteCustomDate}
+                      onChange={(e) => setInviteCustomDate(e.target.value)}
+                      min={new Date().toISOString().split('T')[0]}
+                      className="w-full bg-black/50 border border-indigo-900/60 focus:border-indigo-400 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none font-mono"
+                    />
                   </div>
-                  <div className="text-right" dir="rtl">
-                    <h4 className="text-white font-bold text-sm">📢 رابط دعوة التسجيل (العربية)</h4>
-                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed font-sans">
-                      شارك رابط التسجيل القصير هذا لتمكين أصحاب الأعمال الجدد من تسجيل حساب خاص بهم والحصول على مساحة عمل نظيفة ومنفصلة. ستبقى بياناتهم وعمليتهم التجارية معزولة تمامًا ولن تتداخل مع بيانات أي أحد آخر.
-                    </p>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-slate-400" />
+                    Daily Operating Hours (Optional)
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="time"
+                      value={inviteHoursStart}
+                      onChange={(e) => setInviteHoursStart(e.target.value)}
+                      placeholder="09:00"
+                      className="w-1/2 bg-black/50 border border-slate-800 focus:border-indigo-400 rounded-xl px-2 py-2 text-[11px] text-white outline-none font-mono"
+                    />
+                    <span className="text-slate-500 text-xs">-</span>
+                    <input
+                      type="time"
+                      value={inviteHoursEnd}
+                      onChange={(e) => setInviteHoursEnd(e.target.value)}
+                      placeholder="18:00"
+                      className="w-1/2 bg-black/50 border border-slate-800 focus:border-indigo-400 rounded-xl px-2 py-2 text-[11px] text-white outline-none font-mono"
+                    />
                   </div>
                 </div>
-              </div>
-              
-              <div className="w-full md:w-1/4 flex flex-col justify-center items-end">
-                <button
-                  type="button"
-                  onClick={handleCopySignupLink}
-                  className={`w-full md:w-auto px-5 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer ${
-                    copiedSignup 
-                      ? 'bg-emerald-600 text-white border border-emerald-500' 
-                      : 'accent-gradient text-white shadow-lg hover:opacity-95'
-                  }`}
-                >
-                  {copiedSignup ? (
-                    <>
-                      <Check className="w-4 h-4 animate-bounce" />
-                      Copied! / تم النسخ
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4" />
-                      Copy Invite Link / نسخ الرابط
-                    </>
-                  )}
-                </button>
+
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    disabled={inviteCreating}
+                    className="w-full bg-gradient-to-r from-indigo-600 via-indigo-500 to-emerald-600 hover:opacity-95 text-white font-black py-2.5 px-4 rounded-xl text-xs uppercase tracking-wider transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Zap className="w-4 h-4" />
+                    Generate Direct Invite Link
+                  </button>
+                </div>
+              </form>
+
+              {/* Just Created Direct Invite Featured Card */}
+              {lastCreatedInvite && (
+                <div className="bg-indigo-950/70 border border-indigo-500/50 p-4 sm:p-5 rounded-2xl space-y-3.5 animate-fadeIn shadow-xl">
+                  <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
+                    <div className="flex items-start sm:items-center gap-2.5">
+                      <span className="text-xl p-2 bg-emerald-500/20 rounded-xl border border-emerald-500/30 shrink-0">🎉</span>
+                      <div>
+                        <div className="text-xs font-black text-white flex items-center gap-2 flex-wrap">
+                          <span>Direct Custom Link Generated:</span>
+                          <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-md text-[10.5px] font-mono font-bold">
+                            {lastCreatedInvite.durationLabel}
+                          </span>
+                        </div>
+                        <div className="text-xs text-indigo-300 font-mono mt-0.5 flex items-center gap-2 flex-wrap">
+                          <span>✉️ {lastCreatedInvite.email}</span>
+                          {lastCreatedInvite.phone && <span className="text-emerald-400 font-bold">📱 {lastCreatedInvite.phone}</span>}
+                          {lastCreatedInvite.companyName && <span className="text-slate-300">🏢 {lastCreatedInvite.companyName}</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Direct Action Buttons */}
+                    <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyCustomInviteLink(lastCreatedInvite.id)}
+                        className="flex-1 sm:flex-initial px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer border border-slate-700 shadow-sm"
+                      >
+                        {copiedInviteId === lastCreatedInvite.id ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-emerald-400">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>Copy Link</span>
+                          </>
+                        )}
+                      </button>
+
+                      <a
+                        href={`https://wa.me/${lastCreatedInvite.phone ? lastCreatedInvite.phone.replace(/[^\d+]/g, '') : ''}?text=${encodeURIComponent(`Salam! Here is your official direct access invitation to the ERP Workspace.\n\n🔗 Access Link: ${getBaseAppUrl()}/?inviteToken=${lastCreatedInvite.id}\n⏱️ Validity: ${lastCreatedInvite.durationLabel}\n🏢 Company: ${lastCreatedInvite.companyName || 'Business Portal'}\n\nPlease click the link to activate your pre-approved account.`)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex-1 sm:flex-initial px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-lg shadow-emerald-950/40"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        <span>WhatsApp</span>
+                      </a>
+
+                      <a
+                        href={`mailto:${lastCreatedInvite.email}?subject=${encodeURIComponent(`Official Direct Access Invitation - ${lastCreatedInvite.companyName || 'ERP Business Workspace'}`)}&body=${encodeURIComponent(`Salam / Hello,\n\nYou have been granted official pre-approved direct access to the ERP Business Workspace.\n\nAccess Link: ${getBaseAppUrl()}/?inviteToken=${lastCreatedInvite.id}\nDuration / Validity: ${lastCreatedInvite.durationLabel}\nExpiry: ${lastCreatedInvite.expiresAt || 'Lifetime Permanent'}\n${lastCreatedInvite.allowedHoursStart ? `Daily Hours: ${lastCreatedInvite.allowedHoursStart} - ${lastCreatedInvite.allowedHoursEnd}\n` : ''}\nPlease click the link above to log in and set up your workspace.\n\nRegards,\nSuper Admin (Irfan Saeed)`)}`}
+                        className="flex-1 sm:flex-initial px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-lg shadow-indigo-950/40"
+                      >
+                        <Mail className="w-4 h-4" />
+                        <span>Email</span>
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCustomInvite(lastCreatedInvite.id)}
+                        className="px-3 py-2 bg-rose-950 hover:bg-rose-900 border border-rose-800/60 text-rose-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                        title="Delete this newly generated link"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                        <span>Delete Link</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-black/70 border border-indigo-900/60 p-3 rounded-xl flex items-center justify-between font-mono text-xs text-indigo-200 select-all overflow-x-auto gap-3">
+                    <span className="select-all font-bold truncate">
+                      {`${getBaseAppUrl()}/?inviteToken=${lastCreatedInvite.id}`}
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-extrabold uppercase shrink-0 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                      ✓ Instant Pre-Approved Link
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Active & Historical Custom Invites Table */}
+              <div className="space-y-3 pt-2">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                  <h4 className="text-xs font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                    <Link2 className="w-4 h-4 text-indigo-400" />
+                    All Generated Custom Direct Links ({customInvites.length})
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    {customInvites.some(inv => inv.status === 'revoked' || (inv.expiresAt && new Date(inv.expiresAt).getTime() < Date.now())) && (
+                      <button
+                        type="button"
+                        onClick={handleClearInactiveInvites}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-rose-950 hover:text-rose-300 border border-slate-700 text-slate-300 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                        title="Clean up all expired or revoked invite links"
+                      >
+                        <Trash2 className="w-3 h-3 text-slate-400 hover:text-rose-400" />
+                        <span>Clear Inactive Links</span>
+                      </button>
+                    )}
+                    <span className="text-[11px] text-slate-400 hidden sm:inline">
+                      Direct 1-Click WhatsApp, Email, Copy & Delete
+                    </span>
+                  </div>
+                </div>
+
+                {customInvites.length > 0 ? (
+                  <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-black/40">
+                    <table className="w-full text-left text-xs min-w-[720px]">
+                      <thead className="bg-slate-950/80 text-slate-400 text-[11px] uppercase border-b border-slate-800 font-mono">
+                        <tr>
+                          <th className="py-3 px-3">Target Tenant Email</th>
+                          <th className="py-3 px-3">Company & Mobile</th>
+                          <th className="py-3 px-3">Allowed Duration</th>
+                          <th className="py-3 px-3">Expiry Date</th>
+                          <th className="py-3 px-3">Status</th>
+                          <th className="py-3 px-3 text-right">Actions & Delete</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 font-mono">
+                        {customInvites.map(inv => {
+                          const isExpired = inv.expiresAt ? new Date(inv.expiresAt).getTime() < Date.now() : false;
+                          const displayStatus = inv.status === 'revoked' ? 'Revoked' : (inv.status === 'used' ? 'Claimed / Used' : (isExpired ? 'Expired' : 'Active'));
+                          
+                          const inviteUrl = `${getBaseAppUrl()}/?inviteToken=${inv.id}`;
+                          const waText = encodeURIComponent(`Salam! Here is your official direct access link to ERP Workspace:\n\n🔗 ${inviteUrl}\n⏱️ Validity: ${inv.durationLabel}\n🏢 Company: ${inv.companyName || 'Business'}`);
+                          const mailSubject = encodeURIComponent(`Official ERP Workspace Invitation - ${inv.companyName || 'Direct Access'}`);
+                          const mailBody = encodeURIComponent(`Salam / Hello,\n\nYou have been invited to the ERP Workspace.\n\nDirect Access Link: ${inviteUrl}\nValidity: ${inv.durationLabel}\nExpiry: ${inv.expiresAt || 'Lifetime Permanent'}\n\nPlease click the link to activate your account.\n\nRegards,\nSuper Admin`);
+
+                          return (
+                            <tr key={inv.id} className="hover:bg-slate-900/50 transition">
+                              <td className="py-3 px-3">
+                                <div className="font-bold text-white text-xs">{inv.email}</div>
+                                <div className="text-[10px] text-slate-500">Created: {inv.createdAt}</div>
+                              </td>
+                              <td className="py-3 px-3 font-sans">
+                                <div className="text-slate-200 text-xs font-bold">{inv.companyName || '—'}</div>
+                                {inv.phone ? (
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="text-[11px] text-emerald-400 font-mono font-bold">{inv.phone}</span>
+                                    <a
+                                      href={`https://wa.me/${inv.phone.replace(/[^\d+]/g, '')}?text=${waText}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title="Chat on WhatsApp"
+                                      className="p-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/40 text-emerald-300 rounded transition"
+                                    >
+                                      <MessageCircle className="w-3 h-3" />
+                                    </a>
+                                    <a
+                                      href={`tel:${inv.phone}`}
+                                      title="Call Phone"
+                                      className="p-1 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/40 text-indigo-300 rounded transition"
+                                    >
+                                      <Phone className="w-3 h-3" />
+                                    </a>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-slate-500 italic">No mobile</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  inv.isPermanent 
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                                    : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                                }`}>
+                                  {inv.durationLabel}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-slate-300 text-xs">
+                                {inv.expiresAt ? inv.expiresAt : <span className="text-amber-400 font-bold">👑 Lifetime</span>}
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                  displayStatus === 'Active' 
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                    : displayStatus === 'Claimed / Used'
+                                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                    : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                }`}>
+                                  {displayStatus}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                  {/* Copy Link Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyCustomInviteLink(inv.id)}
+                                    title="Copy Direct Link"
+                                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs transition cursor-pointer flex items-center gap-1 border border-slate-700"
+                                  >
+                                    {copiedInviteId === inv.id ? (
+                                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="w-3.5 h-3.5 text-indigo-400" />
+                                    )}
+                                    <span className="text-[10px] font-sans">Copy</span>
+                                  </button>
+
+                                  {/* WhatsApp Direct Send Button */}
+                                  <a
+                                    href={`https://wa.me/${inv.phone ? inv.phone.replace(/[^\d+]/g, '') : ''}?text=${waText}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title="Send Direct via WhatsApp"
+                                    className="p-1.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-800/60 text-emerald-300 rounded-lg transition flex items-center gap-1"
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span className="text-[10px] font-sans hidden sm:inline">WhatsApp</span>
+                                  </a>
+
+                                  {/* Email Direct Send Button */}
+                                  <a
+                                    href={`mailto:${inv.email}?subject=${mailSubject}&body=${mailBody}`}
+                                    title="Send Direct via Email"
+                                    className="p-1.5 bg-indigo-950 hover:bg-indigo-900 border border-indigo-800/60 text-indigo-300 rounded-lg transition flex items-center gap-1"
+                                  >
+                                    <Mail className="w-3.5 h-3.5 text-indigo-400" />
+                                    <span className="text-[10px] font-sans hidden sm:inline">Email</span>
+                                  </a>
+
+                                  {inv.status === 'active' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRevokeCustomInvite(inv.id)}
+                                      title="Revoke Invite Link"
+                                      className="p-1.5 bg-amber-950 hover:bg-amber-900 border border-amber-800/60 text-amber-300 rounded-lg text-xs transition cursor-pointer"
+                                    >
+                                      <Lock className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+
+                                  {/* Delete Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteCustomInvite(inv.id)}
+                                    title="Delete Invite Link Permanently (ڈیلیٹ کریں)"
+                                    className="p-1.5 bg-rose-950 hover:bg-rose-900 border border-rose-800/60 text-rose-300 rounded-lg text-xs transition cursor-pointer flex items-center gap-1"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                                    <span className="text-[10px] font-sans font-bold text-rose-300 hidden md:inline">Delete</span>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-2xl text-center text-xs text-slate-400">
+                    No custom direct invite links generated yet. Use the form above to generate links with tailored durations.
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Visual indicator of the dynamic link URL */}
-            <div className="bg-black/50 border border-slate-800 p-3 rounded-xl flex items-center justify-between font-mono text-xs text-slate-400 select-all">
-              <span className="truncate mr-4 text-indigo-305 font-bold select-all">
-                {typeof window !== 'undefined' ? `${window.location.origin}/?mode=register` : 'https://bizsuite.system/?mode=register'}
-              </span>
-              <span className="text-[10px] text-slate-500 font-extrabold uppercase shrink-0">Short Invite Link / رابط دعوة قصير</span>
+            {/* 2. Generic Open Links (Permanent Registration & 24h Guest Evaluation) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Permanent Open Signup Link */}
+              <div className="bg-gradient-to-r from-indigo-950/80 via-slate-900 to-indigo-950/80 border border-indigo-500/30 p-5 rounded-2xl shadow-xl space-y-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-indigo-400">
+                    <Share2 className="w-4 h-4 text-indigo-400" />
+                    <span className="font-extrabold text-[11px] tracking-wider uppercase bg-indigo-500/10 px-2 py-0.5 rounded-lg border border-indigo-500/20 font-mono">
+                      🌟 Open Registration Link
+                    </span>
+                  </div>
+                  <h4 className="text-white font-black text-sm pt-0.5">
+                    Permanent Business Registration Link
+                  </h4>
+                  <p className="text-xs text-slate-300 leading-relaxed font-urdu">
+                    کھلا رجسٹریشن لنک، جس سے نیا بزنس اونر فارم بھر کر مستقل اکاؤنٹ رجسٹر کر سکتا ہے
+                  </p>
+                </div>
+                
+                {/* Action Buttons Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopySignupLink}
+                    className={`py-2.5 px-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition active:scale-[0.98] cursor-pointer shadow-lg ${
+                      copiedSignup 
+                        ? 'bg-emerald-600 text-white border border-emerald-500' 
+                        : 'accent-gradient text-white hover:opacity-95'
+                    }`}
+                  >
+                    {copiedSignup ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copy Link</span>
+                      </>
+                    )}
+                  </button>
+
+                  <a
+                    href={`https://wa.me/?text=${encodeURIComponent(`Salam! Register your business workspace here:\n${getBaseAppUrl()}/?mode=register`)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-lg text-center"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>WhatsApp</span>
+                  </a>
+
+                  <a
+                    href={`mailto:?subject=${encodeURIComponent('ERP Business Registration Link')}&body=${encodeURIComponent(`Salam / Hello,\n\nPlease register your business at:\n${getBaseAppUrl()}/?mode=register\n\nRegards,\nSuper Admin`)}`}
+                    className="py-2.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-lg text-center"
+                  >
+                    <Mail className="w-4 h-4" />
+                    <span>Email</span>
+                  </a>
+                </div>
+
+                <div className="bg-black/60 border border-slate-800 p-2 rounded-xl flex items-center justify-between font-mono text-[11px] text-slate-400 select-all">
+                  <span className="truncate mr-2 text-indigo-300 font-bold select-all">
+                    {`${getBaseAppUrl()}/?mode=register`}
+                  </span>
+                  <span className="text-[9px] text-indigo-400 font-extrabold uppercase shrink-0">Open Link</span>
+                </div>
+              </div>
+
+              {/* 24-Hour Guest Trial Link */}
+              <div className="bg-gradient-to-r from-amber-950/60 via-slate-900 to-amber-950/60 border border-amber-500/30 p-5 rounded-2xl shadow-xl space-y-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-amber-400">
+                    <span className="text-base">⏱️</span>
+                    <span className="font-extrabold text-[11px] tracking-wider uppercase bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20 font-mono text-amber-300">
+                      ⏱️ 24-Hour Guest Pass Link
+                    </span>
+                  </div>
+                  <h4 className="text-white font-black text-sm pt-0.5">
+                    24-Hour Visitor Evaluation Trial
+                  </h4>
+                  <p className="text-xs text-slate-300 leading-relaxed font-urdu">
+                    24 گھنٹے کا وزٹ ٹرائل، جس سے بغیر رجسٹریشن کے 24 گھنٹے تک سسٹم لائیو ٹیسٹ کیا جا سکتا ہے
+                  </p>
+                </div>
+                
+                {/* Action Buttons Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyVisitLink}
+                    className={`py-2.5 px-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition active:scale-[0.98] cursor-pointer shadow-lg ${
+                      copiedVisit 
+                        ? 'bg-emerald-600 text-white border border-emerald-500' 
+                        : 'bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white'
+                    }`}
+                  >
+                    {copiedVisit ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copy 24h Link</span>
+                      </>
+                    )}
+                  </button>
+
+                  <a
+                    href={`https://wa.me/?text=${encodeURIComponent(`Salam! Click here for a free 24-hour instant evaluation session of our ERP Business Workspace:\n${getBaseAppUrl()}/?mode=visit\n\nNo registration required - valid for 24 hours.`)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-lg text-center"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>WhatsApp</span>
+                  </a>
+
+                  <a
+                    href={`mailto:?subject=${encodeURIComponent('24-Hour Guest Trial - ERP Business Workspace')}&body=${encodeURIComponent(`Salam / Hello,\n\nYou can evaluate the ERP Business Workspace with a 24-hour trial pass:\n${getBaseAppUrl()}/?mode=visit\n\nValid for 24 hours from first access.\n\nRegards,\nSuper Admin`)}`}
+                    className="py-2.5 px-3 bg-amber-700 hover:bg-amber-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-lg text-center"
+                  >
+                    <Mail className="w-4 h-4" />
+                    <span>Email</span>
+                  </a>
+                </div>
+
+                <div className="bg-black/60 border border-slate-800 p-2 rounded-xl flex items-center justify-between font-mono text-[11px] text-slate-400 select-all">
+                  <span className="truncate mr-2 text-amber-300 font-bold select-all">
+                    {`${getBaseAppUrl()}/?mode=visit`}
+                  </span>
+                  <span className="text-[9px] text-amber-400 font-extrabold uppercase shrink-0">Auto-Expire 24h</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1367,8 +2571,44 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                         <td className="px-5 py-4 font-mono text-[11px] text-slate-300 select-all font-bold">
                           {item.email}
                         </td>
-                        <td className="px-5 py-4 font-mono text-[11px] text-slate-300 select-all">
-                          {item.phone || <span className="text-slate-600 italic text-[11px]">None logged</span>}
+                        <td className="px-5 py-4 font-mono text-[11px] text-slate-300">
+                          {item.phone ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-emerald-400 select-all">{item.phone}</span>
+                              <a
+                                href={`https://wa.me/${item.phone.replace(/[^\d+]/g, '')}?text=${encodeURIComponent(`Salam ${item.name}! Super Admin message.`)}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Chat on WhatsApp"
+                                className="p-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/50 text-emerald-300 rounded transition"
+                              >
+                                <MessageCircle className="w-3 h-3" />
+                              </a>
+                              <a
+                                href={`tel:${item.phone}`}
+                                title="Call Phone"
+                                className="p-1 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/50 text-indigo-300 rounded transition"
+                              >
+                                <Phone className="w-3 h-3" />
+                              </a>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <span className="text-slate-600 italic text-[10.5px]">None</span>
+                              {item.type === 'merchant' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const match = tenants.find(t => t.id === item.rawId);
+                                    if (match) handleOpenEdit(match);
+                                  }}
+                                  className="text-[9.5px] text-amber-400 hover:text-amber-300 font-sans cursor-pointer ml-1"
+                                >
+                                  + Add Mobile
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="px-5 py-4">
                           <span className="text-slate-200 font-medium">{item.storeContext}</span>
@@ -1418,7 +2658,55 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                           </div>
                         </td>
                         <td className="px-5 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5 font-sans">
+                          <div className="flex items-center justify-end gap-1.5 font-sans flex-wrap">
+                            {item.type === 'merchant' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const tenant = tenants.find(t => t.id === item.rawId);
+                                    if (tenant) handleOpenTimeModal(tenant);
+                                  }}
+                                  className="px-2.5 py-1.5 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-500/40 text-amber-300 rounded-lg text-[10px] font-bold uppercase transition flex items-center gap-1 cursor-pointer shrink-0"
+                                  title="Manage Access Expiry Time & Operating Hours for this tenant"
+                                >
+                                  <Timer className="w-3 h-3 text-amber-400" />
+                                  ⏱️ Validity
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const tenant = tenants.find(t => t.id === item.rawId);
+                                    if (tenant) handleQuickResetPassword(tenant);
+                                  }}
+                                  className="px-2.5 py-1.5 bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-700/50 text-indigo-300 rounded-lg text-[10px] font-bold uppercase transition flex items-center gap-1 cursor-pointer shrink-0"
+                                  title="View / Reset Password for this user"
+                                >
+                                  <Key className="w-3 h-3 text-indigo-400" />
+                                  🔑 Password
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const tenant = tenants.find(t => t.id === item.rawId);
+                                    if (tenant) handleToggleRoleQuick(tenant);
+                                  }}
+                                  disabled={isSelf}
+                                  className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase border transition flex items-center gap-1 shrink-0 ${
+                                    isSelf
+                                      ? 'opacity-40 cursor-not-allowed bg-slate-900 border-slate-800 text-slate-600'
+                                      : 'bg-slate-900 hover:bg-slate-850 text-slate-200 border-slate-800 hover:border-amber-500/50 cursor-pointer'
+                                  }`}
+                                  title="Toggle Role (Admin / Standard User)"
+                                >
+                                  <Crown className="w-3 h-3 text-amber-400" />
+                                  {item.role === 'admin' ? 'Demote' : 'Promote'}
+                                </button>
+                              </>
+                            )}
+
                             {!item.isApproved && (
                               <button
                                 type="button"
@@ -1430,11 +2718,14 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                                     handleToggleCustomerApprovalGlobal(item.rawId);
                                   }
                                 }}
-                                className="px-2.5 py-1.5 bg-amber-950 hover:bg-emerald-950 hover:text-emerald-300 border border-amber-900/30 hover:border-emerald-500/35 text-amber-300 rounded-lg text-[10px] font-extrabold uppercase transition-all cursor-pointer animate-pulse shrink-0"
+                                className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-black rounded-lg text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-md flex items-center gap-1 shrink-0 animate-pulse"
+                                title="Approve registration and grant platform access"
                               >
-                                Approve
+                                <CheckCircle2 className="w-3 h-3" />
+                                ✓ Approve
                               </button>
                             )}
+
                             <button
                               type="button"
                               onClick={() => {
@@ -1453,9 +2744,24 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                                   ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-900 hover:text-white cursor-pointer shadow-lg shadow-emerald-950/10'
                                   : 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900 hover:text-white cursor-pointer shadow-lg shadow-rose-950/10'
                               }`}
+                              title={isBlockedStatus ? "Unblock / Restore user access" : "Block / Deactivate user access immediately"}
                             >
-                               {isSelf ? 'ROOT IMMUNE' : isBlockedStatus ? '✓ ALLOW' : '🚫 BLOCK'}
+                               {isSelf ? 'ROOT IMMUNE' : isBlockedStatus ? '✓ UNBLOCK' : '🚫 BLOCK'}
                             </button>
+
+                            {item.type === 'merchant' && !isSelf && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const tenant = tenants.find(t => t.id === item.rawId);
+                                  if (tenant) handleRejectTenantQuick(tenant);
+                                }}
+                                className="p-1.5 bg-rose-950/40 hover:bg-rose-900/80 border border-rose-900/40 text-rose-300 rounded-lg transition cursor-pointer shrink-0"
+                                title="Permanently delete user account and associated tables"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1551,6 +2857,16 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                                 {tenant.id === currentUser.id && (
                                   <span className="bg-indigo-950 text-indigo-400 text-[8px] tracking-wide uppercase px-1.5 py-0.5 rounded border border-indigo-900/50 font-mono">My Account</span>
                                 )}
+                                {tenant.isGuestPass && (
+                                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[8.5px] px-1.5 py-0.2 rounded font-mono font-bold">
+                                    ⏱️ 24h Pass
+                                  </span>
+                                )}
+                                {tenant.guestUpgradeRequested && (
+                                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[8.5px] px-1.5 py-0.2 rounded font-mono font-bold animate-pulse">
+                                    ⭐ Upgrade Requested
+                                  </span>
+                                )}
                                 {isOnline && (
                                   <span className="bg-emerald-955 text-emerald-400 text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded border border-emerald-555/25 tracking-wider flex items-center gap-1 shrink-0 animate-pulse font-mono">
                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
@@ -1559,6 +2875,47 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                                 )}
                               </div>
                               <div className="text-slate-400 text-[11px] font-mono mt-0.5 select-all">{tenant.email}</div>
+                              
+                              {/* Direct Mobile & WhatsApp Contact Bar */}
+                              {tenant.phone ? (
+                                <div className="flex items-center gap-1.5 mt-1">
+                                  <span className="text-[11px] font-mono text-emerald-400 font-bold">{tenant.phone}</span>
+                                  <a
+                                    href={`https://wa.me/${tenant.phone.replace(/[^\d+]/g, '')}?text=${encodeURIComponent(`Salam ${tenant.companyName}! This is Super Admin regarding your ERP account.`)}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title="Chat on WhatsApp"
+                                    className="p-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/50 text-emerald-300 rounded transition"
+                                  >
+                                    <MessageCircle className="w-3 h-3" />
+                                  </a>
+                                  <a
+                                    href={`tel:${tenant.phone}`}
+                                    title="Call Mobile"
+                                    className="p-1 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/50 text-indigo-300 rounded transition"
+                                  >
+                                    <Phone className="w-3 h-3" />
+                                  </a>
+                                  <a
+                                    href={`mailto:${tenant.email}`}
+                                    title="Send Email"
+                                    className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition"
+                                  >
+                                    <Mail className="w-3 h-3" />
+                                  </a>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEdit(tenant)}
+                                  className="text-[10px] text-amber-400/90 hover:text-amber-300 flex items-center gap-1 mt-1 font-sans cursor-pointer"
+                                  title="Add mobile phone number for this business"
+                                >
+                                  <Phone className="w-3 h-3 text-amber-400" />
+                                  <span>+ Add Mobile / WhatsApp</span>
+                                </button>
+                              )}
+
                               <div className="text-slate-500 text-[9px] font-mono mt-0.5 flex items-center gap-1">
                                 <span>Tenant ID:</span>
                                 <span className="bg-slate-950 px-1 py-0.2 rounded text-[8.5px] border border-slate-850/60 select-all font-bold text-indigo-400">
@@ -1656,6 +3013,26 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                         </td>
                         <td className="px-5 py-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenTimeModal(tenant)}
+                              className="px-2.5 py-1 bg-amber-950/70 hover:bg-amber-900 border border-amber-500/40 text-amber-300 rounded-lg text-[10.5px] font-bold uppercase transition flex items-center gap-1 cursor-pointer"
+                              title="Manage Access Expiry Time & Operating Hours for this tenant"
+                            >
+                              <Timer className="w-3.5 h-3.5 text-amber-400" />
+                              ⏱️ Time / Validity
+                            </button>
+                            {tenant.isGuestPass && (
+                              <button
+                                type="button"
+                                onClick={() => handleGrantGuestPermanent(tenant)}
+                                className="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-extrabold rounded-lg text-[10.5px] flex items-center gap-1 transition-all cursor-pointer shadow-md"
+                                title="Grant full permanent access and convert guest sandbox into permanent tenant database."
+                              >
+                                <Crown className="w-3.5 h-3.5 text-amber-300" />
+                                Make Permanent
+                              </button>
+                            )}
                             {tenant.id !== currentUser.id && (
                               <button
                                 type="button"
@@ -2444,9 +3821,11 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                     onChange={(e) => setCreateLanguage(e.target.value as any)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-xs text-white"
                   >
-                    <option value="en">English (EN)</option>
-                    <option value="ar">العربية (AR)</option>
-                    <option value="hi">हिन्दी (HI)</option>
+                    <option value="en">🇬🇧 English (EN)</option>
+                    <option value="ar">🇸🇦 العربية (AR)</option>
+                    <option value="ur">🇵🇰 اردو (UR)</option>
+                    <option value="bn">🇧🇩 বাংলা (BN)</option>
+                    <option value="hi">🇮🇳 हिन्दी (HI)</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -2460,8 +3839,8 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                 </div>
               </div>
 
-              {/* Tax Reference Registry */}
-              <div className="grid grid-cols-2 gap-3.5">
+              {/* Tax Reference Registry & Contact Mobile */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">VAT registration ID (TRN) (Optional)</label>
                   <input
@@ -2473,13 +3852,16 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Contact Phone</label>
+                  <label className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                    Mobile / WhatsApp Contact Phone
+                  </label>
                   <input
                     type="text"
-                    placeholder="E.g., +966 50 123 4567"
+                    placeholder="E.g., +92 300 1234567 or +966 50 123 4567"
                     value={createPhone}
                     onChange={(e) => setCreatePhone(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-xs text-white font-mono"
+                    className="w-full bg-slate-950 border border-emerald-900/40 focus:border-emerald-500 rounded-lg py-2 px-3 text-xs text-white font-mono"
                   />
                 </div>
               </div>
@@ -2601,8 +3983,8 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                 </div>
               </div>
 
-              {/* Password update direct hook */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Password update direct hook & Mobile Phone */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[9px] uppercase font-bold text-slate-450 tracking-wider flex items-center gap-1">
                     <Key className="w-3 h-3 text-indigo-400" /> Administrative Password reset
@@ -2616,12 +3998,15 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[9px] uppercase font-bold text-slate-450 tracking-wider">Contact Phone</label>
+                  <label className="text-[9px] uppercase font-bold text-emerald-400 tracking-wider flex items-center gap-1">
+                    <Phone className="w-3 h-3 text-emerald-400" /> Mobile / WhatsApp Contact Phone
+                  </label>
                   <input
                     type="text"
                     value={editPhone}
                     onChange={(e) => setEditPhone(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-xs text-white font-mono"
+                    placeholder="+92 300 1234567"
+                    className="w-full bg-slate-950 border border-emerald-900/40 focus:border-emerald-500 rounded-lg py-1.5 px-2.5 text-xs text-white font-mono"
                   />
                 </div>
               </div>
@@ -2689,9 +4074,11 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                     onChange={(e) => setEditLanguage(e.target.value as any)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-xs text-white"
                   >
-                    <option value="en">English (EN)</option>
-                    <option value="ar">العربية (AR)</option>
-                    <option value="hi">हिन्दी (HI)</option>
+                    <option value="en">🇬🇧 English (EN)</option>
+                    <option value="ar">🇸🇦 العربية (AR)</option>
+                    <option value="ur">🇵🇰 اردو (UR)</option>
+                    <option value="bn">🇧🇩 বাংলা (BN)</option>
+                    <option value="hi">🇮🇳 हिन्दी (HI)</option>
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -2927,6 +4314,239 @@ export default function AdminModule({ currentUser, onRefreshStats, onImpersonate
                 >
                   <Save className="w-3.5 h-3.5" />
                   Apply Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TENANT ACCESS TIME & VALIDITY CONTROL MODAL (SUPER ADMIN DIRECT CONTROL) */}
+      {showTimeModal && timeModalTenant && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-5 relative">
+            {/* Modal Header */}
+            <div className="flex justify-between items-start pb-4 border-b border-amber-500/20">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    <Timer className="w-5 h-5" />
+                  </span>
+                  <h3 className="text-base font-black text-white tracking-tight">
+                    Tenant Access Time & Duration Manager
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-300 font-urdu leading-relaxed">
+                  سپر ایڈمن کنٹرول: اس ٹیننٹ کی رسائی کی مدت تبدیل کریں، وقت بڑھائیں یا مستقل رسائی دیں
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTimeModal(false)}
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Target Tenant Overview Badge */}
+            <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div>
+                <div className="font-extrabold text-white text-sm">{timeModalTenant.companyName}</div>
+                <div className="text-xs text-indigo-400 font-mono">{timeModalTenant.email}</div>
+                {timeModalTenant.phone && <div className="text-[11px] text-slate-400 font-mono">{timeModalTenant.phone}</div>}
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-slate-400 font-mono block">Current Expiry Status</span>
+                <span className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold inline-block mt-0.5 ${
+                  !timeModalTenant.subscriptionExpiry
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    : new Date(timeModalTenant.subscriptionExpiry).getTime() < Date.now()
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                }`}>
+                  {timeModalTenant.subscriptionExpiry ? `Expires: ${timeModalTenant.subscriptionExpiry}` : '👑 Lifetime Permanent'}
+                </span>
+              </div>
+            </div>
+
+            {/* 1-Click Quick Extension Buttons */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                Quick 1-Click Duration Extension (فوری وقت بڑھائیں):
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleQuickExtendTenant('24h')}
+                  disabled={timeModalSubmitting}
+                  className="p-2.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer font-mono"
+                >
+                  ⏱️ +24 Hours
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickExtendTenant('7d')}
+                  disabled={timeModalSubmitting}
+                  className="p-2.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer font-mono"
+                >
+                  📅 +7 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickExtendTenant('30d')}
+                  disabled={timeModalSubmitting}
+                  className="p-2.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer font-mono"
+                >
+                  📅 +30 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickExtendTenant('90d')}
+                  disabled={timeModalSubmitting}
+                  className="p-2.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer font-mono"
+                >
+                  📅 +90 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickExtendTenant('180d')}
+                  disabled={timeModalSubmitting}
+                  className="p-2.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer font-mono"
+                >
+                  📅 +180 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickExtendTenant('365d')}
+                  disabled={timeModalSubmitting}
+                  className="p-2.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer font-mono"
+                >
+                  📅 +1 Year
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickExtendTenant('permanent')}
+                  disabled={timeModalSubmitting}
+                  className="col-span-2 p-2.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-amber-950/40 font-mono uppercase tracking-wider"
+                >
+                  <Crown className="w-4 h-4 text-amber-200" />
+                  👑 Set Lifetime Permanent
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Expiry & Settings Form */}
+            <form onSubmit={handleSaveTimeModal} className="space-y-4 pt-2 border-t border-slate-800">
+              <div className="bg-slate-950/60 border border-slate-850 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-white flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={timeModalIsPermanent}
+                      onChange={(e) => setTimeModalIsPermanent(e.target.checked)}
+                      className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-900 border-slate-700"
+                    />
+                    <span>Lifetime Permanent Access (بغیر تاریخ کے مستقل رسائی)</span>
+                  </label>
+                  {timeModalIsPermanent && (
+                    <span className="text-[10px] text-amber-300 font-mono font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                      No Expiry Date
+                    </span>
+                  )}
+                </div>
+
+                {!timeModalIsPermanent && (
+                  <div className="space-y-1.5 pt-1">
+                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                      <CalendarDays className="w-3.5 h-3.5 text-indigo-400" />
+                      Specific Access Expiry Date (رسائی کی آخری تاریخ)
+                    </label>
+                    <input
+                      type="date"
+                      value={timeModalExpiry}
+                      onChange={(e) => setTimeModalExpiry(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Operating Hours and Lockout */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                    Daily Operating Window (روزانہ کھلنے کا وقت)
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="time"
+                      value={timeModalHoursStart}
+                      onChange={(e) => setTimeModalHoursStart(e.target.value)}
+                      className="w-1/2 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-2 py-2 text-xs text-white outline-none font-mono"
+                    />
+                    <span className="text-slate-500 text-xs">-</span>
+                    <input
+                      type="time"
+                      value={timeModalHoursEnd}
+                      onChange={(e) => setTimeModalHoursEnd(e.target.value)}
+                      className="w-1/2 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-2 py-2 text-xs text-white outline-none font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-indigo-400" />
+                    Subscription Status (اسٹیٹس)
+                  </label>
+                  <select
+                    value={timeModalStatus}
+                    onChange={(e) => setTimeModalStatus(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white outline-none font-bold"
+                  >
+                    <option value="active">Active (فعال - رسائی کی اجازت ہے)</option>
+                    <option value="expired">Expired (مدت ختم - رسائی بلاک)</option>
+                    <option value="inactive">Inactive (غیر فعال)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Temporary Suspension */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                  Temporary Suspension Until (عارضی طور پر معطل رکھیں)
+                </label>
+                <input
+                  type="date"
+                  value={timeModalSuspendedUntil}
+                  onChange={(e) => setTimeModalSuspendedUntil(e.target.value)}
+                  className="w-full bg-slate-950 border border-rose-900/40 focus:border-rose-500 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                />
+                <p className="text-[10px] text-slate-500">
+                  اگر آپ کسی مخصوص تاریخ تک رسائی روکنا چاہتے ہیں تو یہاں تاریخ منتخب کریں، ورنہ خالی چھوڑ دیں۔
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowTimeModal(false)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={timeModalSubmitting}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-lg cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Save Changes / محفوظ کریں
                 </button>
               </div>
             </form>

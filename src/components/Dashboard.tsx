@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UserTenant, DashboardStats } from '../types';
+import { UserTenant, DashboardStats, Language } from '../types';
 import { translations, currencySymbols } from '../translations';
 import { 
   TrendingUp, TrendingDown, DollarSign, Users, AlertTriangle, FileText, PlusCircle, 
@@ -17,10 +17,12 @@ interface DashboardProps {
   user: UserTenant;
   stats: DashboardStats;
   onNavigate: (module: string) => void;
+  language?: Language;
 }
 
-export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
-  const t = translations[user.language];
+export default function Dashboard({ user, stats, onNavigate, language }: DashboardProps) {
+  const activeLang: Language = language || user.language || 'en';
+  const t = translations[activeLang] || translations.en;
   const symbol = currencySymbols[user.currency];
   
   const [copiedLink, setCopiedLink] = useState(false);
@@ -125,7 +127,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
     return `${symbol} ${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const isRtl = user.language === 'ar' || user.language === 'ur';
+  const isRtl = activeLang === 'ar' || activeLang === 'ur';
 
   // Container configuration for animation
   const containerVariants = {
@@ -166,7 +168,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
             type="button"
           >
             <RefreshCw className="w-4 h-4 text-rose-400" />
-            Reset Ledger
+            {t.resetLedger || 'Reset Ledger'}
           </button>
 
           <button 
@@ -192,7 +194,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
           <div className="space-y-1">
             <div className="flex items-center gap-1">
               <span className="text-xs text-indigo-200/60 font-semibold uppercase tracking-wider">{t.totalSales}</span>
-              <span className="text-[9px] text-indigo-400 bg-indigo-950/60 px-1 py-0.2 rounded border border-indigo-900 border-dashed group-hover:bg-indigo-900 group-hover:text-white transition-colors">Details</span>
+              <span className="text-[9px] text-indigo-400 bg-indigo-950/60 px-1 py-0.2 rounded border border-indigo-900 border-dashed group-hover:bg-indigo-900 group-hover:text-white transition-colors">{t.details || 'Details'}</span>
             </div>
             <div className="text-2xl font-black text-white">{formatMoney(stats.totalSales)}</div>
           </div>
@@ -212,7 +214,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
           <div className="space-y-1">
             <div className="flex items-center gap-1">
               <span className="text-xs text-indigo-200/60 font-semibold uppercase tracking-wider">{t.totalExpenses}</span>
-              <span className="text-[9px] text-rose-450 bg-rose-950/60 px-1 py-0.2 rounded border border-rose-900 border-dashed group-hover:bg-rose-900 group-hover:text-white transition-colors">Details</span>
+              <span className="text-[9px] text-rose-450 bg-rose-950/60 px-1 py-0.2 rounded border border-rose-900 border-dashed group-hover:bg-rose-900 group-hover:text-white transition-colors">{t.details || 'Details'}</span>
             </div>
             <div className="text-2xl font-black text-white">{formatMoney(stats.totalExpenses)}</div>
           </div>
@@ -239,7 +241,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
                 stats.profit >= 0 
                   ? 'text-emerald-450 bg-emerald-950/60 border-emerald-900 group-hover:bg-emerald-900 group-hover:text-white' 
                   : 'text-rose-450 bg-rose-950/60 border-rose-900 group-hover:bg-rose-900 group-hover:text-white'
-              }`}>Details</span>
+              }`}>{t.details || 'Details'}</span>
             </div>
             <div className={`text-2xl font-black ${stats.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {formatMoney(stats.profit)}
@@ -265,7 +267,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
           <div className="space-y-1">
             <div className="flex items-center gap-1">
               <span className="text-xs text-indigo-200/60 font-semibold uppercase tracking-wider">{t.customersCount}</span>
-              <span className="text-[9px] text-blue-400 bg-blue-950/60 px-1 py-0.2 rounded border border-blue-900 border-dashed group-hover:bg-blue-900 group-hover:text-white transition-colors">Details</span>
+              <span className="text-[9px] text-blue-400 bg-blue-950/60 px-1 py-0.2 rounded border border-blue-900 border-dashed group-hover:bg-blue-900 group-hover:text-white transition-colors">{t.details || 'Details'}</span>
             </div>
             <div className="text-2xl font-black text-white">{stats.customerCount}</div>
           </div>
@@ -304,7 +306,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
           <div className="flex justify-between items-center pb-2 border-b border-indigo-500/10">
             <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
               <ShoppingBag className="w-4 h-4 text-emerald-400" />
-              Recent Income & Sales
+              {t.recentSales || 'Recent Income & Sales'}
             </h3>
             <button 
               onClick={() => onNavigate('sales')} 
@@ -316,7 +318,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
 
           <div className="space-y-3">
             {recentSales.length === 0 ? (
-              <p className="text-xs text-slate-500 py-6 text-center italic font-sans">No transactions recorded yet.</p>
+              <p className="text-xs text-slate-500 py-6 text-center italic font-sans">{t.noTransactions || 'No transactions recorded yet.'}</p>
             ) : (
               recentSales.map((sale) => (
                 <div 
@@ -350,7 +352,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
           <div className="flex justify-between items-center pb-2 border-b border-indigo-500/10">
             <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
               <FileText className="w-4 h-4 text-indigo-400" />
-              Pending & Settled Invoices
+              {t.pendingInvoices || 'Pending & Settled Invoices'}
             </h3>
             <button 
               onClick={() => onNavigate('invoices')} 
@@ -362,7 +364,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
 
           <div className="space-y-3">
             {recentInvoices.length === 0 ? (
-              <p className="text-xs text-slate-500 py-6 text-center italic font-sans font-medium">No invoices drafted yet.</p>
+              <p className="text-xs text-slate-500 py-6 text-center italic font-sans font-medium">{t.noInvoicesDrafted || 'No invoices drafted yet.'}</p>
             ) : (
               recentInvoices.map((inv) => (
                 <div 
@@ -408,7 +410,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
         >
           <h3 className="font-extrabold text-white text-xs uppercase text-orange-400 flex items-center gap-1">
             <AlertTriangle className="w-4 h-4 text-orange-400" />
-            Stock Replenishment Required List
+            {t.lowStockList || 'Stock Replenishment Required List'}
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {criticalProducts.map(prod => (
@@ -424,7 +426,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
                 </div>
                 <div className="text-right">
                   <p className="font-black text-rose-400">{prod.stock} / {prod.minStockAlert}</p>
-                  <p className="text-[9px] text-slate-500">In Hand</p>
+                  <p className="text-[9px] text-slate-500">{t.inHand || 'In Hand'}</p>
                 </div>
               </div>
             ))}
@@ -444,7 +446,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
             </div>
             <div>
               <h3 className="font-extrabold text-white text-sm flex items-center gap-1.5 flex-wrap">
-                Best Selling Products Performance
+                {t.bestSellingProducts || 'Best Selling Products Performance'}
               </h3>
               <p className="text-[10px] text-slate-400">Displays live ranking of top-performing items based on quantity sold in invoice logs.</p>
             </div>
@@ -483,7 +485,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
                         </span>
                         <span className="text-white font-bold group-hover:text-indigo-400">{item.name}</span>
                       </div>
-                      <span className="text-indigo-400 font-mono font-bold text-[11px]">{item.quantity} sold</span>
+                      <span className="text-indigo-400 font-mono font-bold text-[11px]">{item.quantity} {t.sold || 'sold'}</span>
                     </div>
 
                     <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-900">
@@ -531,7 +533,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
             </div>
             <div>
               <h3 className="font-extrabold text-white text-sm flex items-center gap-1.5 flex-wrap">
-                Share Secure Workspace Access Desk
+                {t.shareWorkspace || 'Share Secure Workspace Access Desk'}
               </h3>
               <p className="text-[10px] text-slate-400">Distribute secure access links or short codes directly to your managers or staff terminals.</p>
             </div>
@@ -1369,7 +1371,7 @@ export default function Dashboard({ user, stats, onNavigate }: DashboardProps) {
         onConfirm={handleResetConfirm}
         title="Reset Tenant Ledger Ledger?"
         message="This is a highly dangerous operation! This will permanently delete ALL registered customers, product listings, sales revenue sheets, supplier purchase logs, operations expenses, and dynamic generated invoices for your tenant workspace. Click Confirm or Reset below to wipe clean."
-        language={user.language}
+        language={activeLang}
       />
     </motion.div>
   );

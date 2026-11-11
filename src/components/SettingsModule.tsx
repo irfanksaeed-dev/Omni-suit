@@ -45,6 +45,9 @@ export default function SettingsModule({ user, onUpdateUser }: SettingsModulePro
 
     const updated = updateTenantSettings(payload);
     if (updated) {
+      try {
+        localStorage.setItem('biz_suite_language', lang);
+      } catch (e) {}
       onUpdateUser(updated);
       setSuccessMsg(t.settingsSaved);
       setTimeout(() => setSuccessMsg(''), 3000);
@@ -258,10 +261,11 @@ export default function SettingsModule({ user, onUpdateUser }: SettingsModulePro
                   onChange={(e) => setLang(e.target.value as Language)}
                   className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2.5 text-white"
                 >
-                  <option value="en">English (LTR)</option>
-                  <option value="ar">العربية (RTL)</option>
-                  <option value="ur">اردو (RTL)</option>
-                  <option value="hi">हिंदी (LTR)</option>
+                  <option value="en">🇬🇧 English (LTR)</option>
+                  <option value="ar">🇸🇦 العربية - Arabic (RTL)</option>
+                  <option value="ur">🇵🇰 اردو - Urdu (RTL)</option>
+                  <option value="bn">🇧🇩 বাংলা - Bangali (LTR)</option>
+                  <option value="hi">🇮🇳 हिंदी - Hindi (LTR)</option>
                 </select>
               </div>
             </div>

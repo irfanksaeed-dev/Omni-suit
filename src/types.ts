@@ -1,4 +1,4 @@
-export type Language = 'en' | 'ar' | 'ur' | 'hi';
+export type Language = 'en' | 'ar' | 'ur' | 'bn' | 'hi';
 export type Currency = 'AED' | 'USD' | 'PKR' | 'INR' | 'SAR' | 'EUR';
 
 export interface UserTenant {
@@ -28,6 +28,28 @@ export interface UserTenant {
   tempSuspendedUntil?: string; // ISO date format suspension expiry
   isApproved?: boolean; // Super admin approval status
   lastLoginTime?: string; // Last login timestamp
+  isGuestPass?: boolean; // 24-hour guest visitor pass flag
+  guestExpiresAt?: string; // ISO timestamp when 24-hour visitor access expires
+  guestUpgradeRequested?: boolean; // When 24h visitor requests Super Admin permission for permanent upgrade
+  guestUpgradeRequestedAt?: string; // Timestamp when permanent access was requested
+  guestUpgradeNotes?: string; // Notes/contact details supplied by visitor during request
+}
+
+export interface CustomInvite {
+  id: string; // Token ID, e.g. inv-xxxxxxxx
+  email: string;
+  companyName?: string;
+  phone?: string;
+  durationLabel: string; // e.g. "24 Hours", "7 Days", "30 Days", "1 Year", "Permanent"
+  expiresAt?: string; // ISO date/time string or undefined for permanent
+  allowedHoursStart?: string;
+  allowedHoursEnd?: string;
+  isPermanent: boolean;
+  createdAt: string;
+  createdBy: string;
+  status: 'active' | 'used' | 'revoked' | 'expired';
+  usedAt?: string;
+  usedByTenantId?: string;
 }
 
 export interface ChatMessage {
@@ -102,7 +124,7 @@ export interface Invoice {
   balanceDue?: number;
   notes: string;
   status: 'paid' | 'unpaid' | 'overdue';
-  paymentMethod?: 'cash' | 'card' | 'bank' | 'other';
+  paymentMethod?: 'cash' | 'card' | 'bank' | 'credit' | 'other';
   createdAt: string;
 }
 
@@ -110,14 +132,24 @@ export interface Sale {
   id: string;
   tenantId: string;
   invoiceId?: string; // Optional reference to invoice
+  customerId?: string; // Optional linked customer ID
   customerName: string;
   date: string;
-  amount: number;
+  amount: number; // Grand total amount
+  subtotal?: number;
+  taxRate?: number;
+  taxAmount?: number;
+  discount?: number;
+  discountType?: 'fixed' | 'percentage';
+  discountValue?: number;
+  isTaxEnabled?: boolean;
   category: string;
   description: string;
-  paymentMethod: 'cash' | 'card' | 'bank' | 'other';
+  paymentMethod: 'cash' | 'card' | 'bank' | 'credit' | 'other';
   createdAt: string;
-  items?: InvoiceItem[]; // Optional itemized products for the sale checkout integration
+  items?: InvoiceItem[]; // Line items for cart-based POS
+  receiptNumber?: string; // Sequential receipt/invoice tracking number
+  isCredit?: boolean; // Whether recorded as Udhaar / Credit
 }
 
 export interface Expense {

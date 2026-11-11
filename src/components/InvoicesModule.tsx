@@ -7,163 +7,189 @@ import { motion } from 'motion/react';
 import ConfirmModal from './ConfirmModal';
 import { jsPDF } from 'jspdf';
 import { cleanPhoneForWhatsApp, getDefaultPhoneCode } from '../utils/phone';
+import { getBaseAppUrl, copyTextToClipboard, openExternalLink } from '../utils/links';
 
 const bilingualTerms = {
   invoiceTitle: {
     en: 'TAX INVOICE',
     ar: 'فاتورة ضريبية مبسطة',
     ur: 'ٹیکس انوائس',
+    bn: 'ট্যাক্স চালান (চালানপত্র)',
     hi: 'टैक्स इनवॉइस'
   },
   invoiceNumber: {
     en: 'Invoice Number',
     ar: 'رقم الفاتورة',
     ur: 'انوائس نمبر',
+    bn: 'চালান নম্বর',
     hi: 'इनवॉइस नंबर'
   },
   date: {
     en: 'Date of Issue',
     ar: 'تاريخ الإصدار',
     ur: 'تاریخ اجراء',
+    bn: 'ইস্যুর তারিখ',
     hi: 'जारी करने की तिथि'
   },
   dueDate: {
     en: 'Due Date',
     ar: 'تاريخ الاستحقاق',
     ur: 'آخری تاریخ',
+    bn: 'পরিশোধের শেষ তারিখ',
     hi: 'देय तिथि'
   },
   billedTo: {
     en: 'Billed To (Buyer)',
     ar: 'الفاتورة إلى (العميل)',
     ur: 'بل بنام (خریدار)',
+    bn: 'ক্রেতার বিবরণ',
     hi: 'बिल प्राप्तकर्ता (क्रेता)'
   },
   status: {
     en: 'Payment Status',
     ar: 'حالة السداد',
     ur: 'ادائیگی کی صورتحال',
+    bn: 'পরিশোধের অবস্থা',
     hi: 'भुगतान की स्थिति'
   },
   description: {
     en: 'Description / Particulars',
     ar: 'البيان / تفاصيل السلع',
     ur: 'تفصیل / سامان کا نام',
+    bn: 'বিবরণ / পণ্যের নাম',
     hi: 'विवरण / विशेष'
   },
   qty: {
     en: 'Qty',
     ar: 'الكمية',
     ur: 'مقدار',
+    bn: 'পরিমাণ',
     hi: 'मात्रा'
   },
   price: {
     en: 'Unit Price',
     ar: 'سعر الوحدة',
     ur: 'یونٹ کی قیمت',
+    bn: 'একক মূল্য',
     hi: 'इकाई मूल्य'
   },
   total: {
     en: 'Total Amount',
     ar: 'المجموع الإجمالي',
     ur: 'کل رقم',
+    bn: 'মোট টাকা',
     hi: 'कुल राशि'
   },
   subtotal: {
     en: 'Subtotal (Excl. VAT)',
     ar: 'المجموع الفرعي (خاضع للضريبة)',
     ur: 'ذیلی کل (ٹیکس کے بغیر)',
+    bn: 'উপ-মোট (ভ্যাট ছাড়া)',
     hi: 'उप-योग (बिना टैक्स)'
   },
   tax: {
     en: 'VAT (Tax Amount)',
     ar: 'ضريبة القيمة المضافة',
     ur: 'ٹیکس رقم (واٹ)',
+    bn: 'ভ্যাট / কর',
     hi: 'वैट (टैक्स राशि)'
   },
   discount: {
     en: 'Discount',
     ar: 'الخصم الممنوح',
     ur: 'رعایت / ڈسکاؤنٹ',
+    bn: 'ছাড় (ডিসকাউন্ট)',
     hi: 'छूट (डिस्काउंट)'
   },
   totalPayable: {
     en: 'Total Payable (Incl. VAT)',
     ar: 'إجمالي المبلغ المستحق',
     ur: 'قابل ادائیگی رقم (ٹیکس سمیت)',
+    bn: 'সর্বমোট প্রদেয়',
     hi: 'कुल देय राशि (टैक्स सहित)'
   },
   amountPaid: {
     en: 'Amount Paid',
     ar: 'المبلغ المدفوع',
     ur: 'ادا شدہ رقم',
+    bn: 'পরিশোধিত টাকা',
     hi: 'भुगतान की गई राशि'
   },
   balanceDue: {
     en: 'Balance Due',
     ar: 'المتبقي المستحق',
     ur: 'باقی رقم',
+    bn: 'বকেয়া টাকা',
     hi: 'शेष राशि'
   },
   notes: {
     en: 'Notes & Payment Terms',
     ar: 'الشروط وملاحظات الدفع',
     ur: 'نوٹ اور شرائط',
+    bn: 'শর্তাবলী ও নোট',
     hi: 'नोट और भुगतान की शर्तें'
   },
   trn: {
     en: 'VAT TRN (Seller Tax ID)',
     ar: 'الرقم الضريبي للمنشأة',
     ur: 'سپلائر ٹیکس رجسٹریشن نمبر',
+    bn: 'বিক্রেতার ট্যাক্স আইডি (TRN)',
     hi: 'विक्रेता टैक्स आईडी (TRN)'
   },
   buyerTrn: {
     en: 'Buyer Tax ID (TRN)',
     ar: 'الرقم الضريبي للمشتري',
     ur: 'خریدار ٹیکس رجسٹریشن نمبر',
+    bn: 'ক্রেতার ট্যাক্স আইডি (TRN)',
     hi: 'क्रेता टैक्स आईडी (TRN)'
   },
   authorizedSign: {
     en: 'Prepared / Authorized Signature',
     ar: 'توقيع الجهة المعتمد',
     ur: 'مجاز دستخط',
+    bn: 'অনুমোদিত স্বাক্ষর',
     hi: 'अधिकृत हस्ताक्षर'
   },
   thankYou: {
     en: 'Thank you for your business!',
     ar: 'نشكركم على تعاملكم معنا ونقدر ثقتكم!',
     ur: 'آپ کے تعاون کا شکریہ!',
-    hi: 'आपके व्यवसाय کے लिए धन्यवाद!'
+    bn: 'আমাদের সাথে ব্যবসা করার জন্য ধন্যবাদ!',
+    hi: 'आपके व्यवसाय के लिए धन्यवाद!'
   },
   paidStatus: {
     en: 'PAID',
     ar: 'مدفوعة',
     ur: 'ادا شدہ',
+    bn: 'পরিশোধিত',
     hi: 'भुगतान किया गया'
   },
   unpaidStatus: {
     en: 'UNPAID',
     ar: 'غير مدفوعة',
     ur: 'غیر ادا شدہ',
+    bn: 'অপরিশোধিত',
     hi: 'अवैतनिक'
   },
   via: {
     en: 'Via',
     ar: 'وسيلة الدفع',
     ur: 'بذریعہ',
+    bn: 'মাধ্যমে',
     hi: 'के माध्यम से'
   }
 };
 
 const getBilingualValueAndForward = (
   key: keyof typeof bilingualTerms,
-  lang: 'en' | 'ar' | 'ur' | 'hi' | 'bilingual',
-  secondaryLang: 'ar' | 'ur' | 'hi' = 'ar'
+  lang: 'en' | 'ar' | 'ur' | 'bn' | 'hi' | 'bilingual',
+  secondaryLang: 'ar' | 'ur' | 'bn' | 'hi' = 'ar'
 ) => {
   const item = bilingualTerms[key];
   if (lang === 'en') return <span className="font-sans leading-relaxed">{item.en}</span>;
   if (lang === 'ar') return <span className="font-sans font-semibold leading-relaxed text-right block" dir="rtl">{item.ar}</span>;
   if (lang === 'ur') return <span className="font-sans font-semibold leading-relaxed text-right block" dir="rtl">{item.ur}</span>;
+  if (lang === 'bn') return <span className="font-sans leading-relaxed">{item.bn}</span>;
   if (lang === 'hi') return <span className="font-sans leading-relaxed">{item.hi}</span>;
 
   // Bilingual Mode (English + Custom Secondary Language)
@@ -182,14 +208,15 @@ const getBilingualValueAndForward = (
 
 const getBilingualStringAndForward = (
   key: keyof typeof bilingualTerms,
-  lang: 'en' | 'ar' | 'ur' | 'hi' | 'bilingual',
-  secondaryLang: 'ar' | 'ur' | 'hi' = 'ar',
+  lang: 'en' | 'ar' | 'ur' | 'bn' | 'hi' | 'bilingual',
+  secondaryLang: 'ar' | 'ur' | 'bn' | 'hi' = 'ar',
   separator: string = ' / '
 ) => {
   const item = bilingualTerms[key];
   if (lang === 'en') return item.en;
   if (lang === 'ar') return item.ar;
   if (lang === 'ur') return item.ur;
+  if (lang === 'bn') return item.bn;
   if (lang === 'hi') return item.hi;
 
   const secondaryText = item[secondaryLang] || item.ar;
@@ -254,7 +281,8 @@ export default function InvoicesModule({ user, onRefreshStats }: InvoicesModuleP
 
   // Sizing & Language settings for active printing/display
   const [printSize, setPrintSize] = useState<'a4' | '80mm' | '58mm'>('a4');
-  const [printLanguage, setPrintLanguage] = useState<'en' | 'ar' | 'ur' | 'hi' | 'bilingual'>('bilingual');
+  const [previewScale, setPreviewScale] = useState<'auto' | '100' | '85' | '75'>('auto');
+  const [printLanguage, setPrintLanguage] = useState<'en' | 'ar' | 'ur' | 'bn' | 'hi' | 'bilingual'>('bilingual');
   const [showLogoOnInvoice, setShowLogoOnInvoice] = useState(true);
   const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
   const [showPrintGuideModal, setShowPrintGuideModal] = useState(false);
@@ -1229,8 +1257,8 @@ export default function InvoicesModule({ user, onRefreshStats }: InvoicesModuleP
                       const defaultCode = getDefaultPhoneCode(user.currency);
                       const cleanPhone = cleanPhoneForWhatsApp(originalPhone, defaultCode);
 
-                      const magicMailLink = window.location.origin + "/?customerEmail=" + encodeURIComponent(matchingCust?.email || '') + "&invoiceId=" + inv.id;
-                      const magicPhoneLink = window.location.origin + "/?customerPhone=" + encodeURIComponent(matchingCust?.phone || '') + "&invoiceId=" + inv.id;
+                      const magicMailLink = getBaseAppUrl() + "/?customerEmail=" + encodeURIComponent(matchingCust?.email || '') + "&invoiceId=" + inv.id;
+                      const magicPhoneLink = getBaseAppUrl() + "/?customerPhone=" + encodeURIComponent(matchingCust?.phone || '') + "&invoiceId=" + inv.id;
                       const selectedLink = matchingCust?.phone ? magicPhoneLink : magicMailLink;
                       
                       const totalVal = formatMoney(inv.total);
@@ -1238,7 +1266,7 @@ export default function InvoicesModule({ user, onRefreshStats }: InvoicesModuleP
                       const waMsg = `Hello *${inv.customerName}*!\n\nYour Invoice *${inv.invoiceNumber}* from *${user.companyName}* is ready.\n*Total:* ${totalVal}\n*Balance Due:* ${dueVal}\n\nPlease click on the link below to view, verify, or pay your invoice instantly:\n${selectedLink}\n\nThank you!\n*${user.companyName}*`;
                       
                       const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(waMsg)}`;
-                      window.open(waUrl, '_blank');
+                      openExternalLink(waUrl, '_blank');
                     }}
                     title="Send on WhatsApp"
                     className="bg-emerald-650/20 hover:bg-emerald-600 hover:text-white border border-emerald-550/30 text-emerald-300 px-2.5 py-1.5 rounded-xl cursor-pointer transition flex items-center gap-1 text-[10px] font-bold"
@@ -1283,11 +1311,12 @@ export default function InvoicesModule({ user, onRefreshStats }: InvoicesModuleP
                   color: black !important;
                   margin: 0 !important;
                   padding: 0 !important;
+                  width: 100% !important;
                 }
                 /* Paper size constraints overrides */
                 @page {
-                  size: ${printSize === 'a4' ? 'A4 portrait' : printSize === '80mm' ? '80mm' : '58mm'};
-                  margin: ${printSize === 'a4' ? '12mm 10mm' : '3mm 2mm'};
+                  size: ${printSize === 'a4' ? 'A4 portrait' : printSize === '80mm' ? '80mm auto' : '58mm auto'};
+                  margin: ${printSize === 'a4' ? '8mm 8mm' : '2mm 2mm'};
                 }
                 /* Hide everything except printable element */
                 body * {
@@ -1301,13 +1330,26 @@ export default function InvoicesModule({ user, onRefreshStats }: InvoicesModuleP
                   left: 0 !important;
                   top: 0 !important;
                   width: ${printSize === 'a4' ? '100%' : printSize === '80mm' ? '80mm' : '58mm'} !important;
-                  font-size: ${printSize === 'a4' ? '11px' : printSize === '80mm' ? '9.5px' : '8px'} !important;
+                  max-width: ${printSize === 'a4' ? '100%' : printSize === '80mm' ? '80mm' : '58mm'} !important;
+                  font-size: ${printSize === 'a4' ? '11px' : printSize === '80mm' ? '9px' : '7.5px'} !important;
                   color: black !important;
                   background: white !important;
-                  padding: 0 !important;
-                  margin: 0 !important;
+                  padding: ${printSize === 'a4' ? '6mm' : '1.5mm'} !important;
+                  margin: 0 auto !important;
                   border: none !important;
                   box-shadow: none !important;
+                  box-sizing: border-box !important;
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
+                }
+                #printable-area table {
+                  width: 100% !important;
+                  page-break-inside: auto !important;
+                  break-inside: auto !important;
+                }
+                #printable-area tr {
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
                 }
                 .print\\:hidden, button, select, header, aside, .fixed, [role="dialog"]:not(#printable-area) {
                   display: none !important;
@@ -1452,17 +1494,17 @@ export default function InvoicesModule({ user, onRefreshStats }: InvoicesModuleP
                 </div>
               </div>
 
-              {/* Sizing & Language preferences bar */}
-              <div className="bg-slate-950/70 px-4 py-2 border-b border-slate-800 flex flex-wrap gap-4 items-center justify-between shrink-0 text-[11px] print:hidden">
-                <div className="flex items-center gap-4 flex-wrap">
-                  <div className="flex items-center gap-2">
+              {/* Sizing & Language & Scaling preferences bar */}
+              <div className="bg-slate-950/70 px-4 py-2 border-b border-slate-800 flex flex-wrap gap-3 sm:gap-4 items-center justify-between shrink-0 text-[11px] print:hidden">
+                <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
                     <span className="font-bold text-slate-400">Page Sizing:</span>
                     <div className="flex bg-slate-900 border border-slate-800 p-0.5 rounded">
                       {(['a4', '80mm', '58mm'] as const).map((sz) => (
                         <button
                           key={sz}
                           onClick={() => setPrintSize(sz)}
-                          className={`px-2.5 py-1 text-[9px] font-extrabold uppercase rounded transition-all cursor-pointer ${
+                          className={`px-2 sm:px-2.5 py-1 text-[9px] font-extrabold uppercase rounded transition-all cursor-pointer ${
                             printSize === sz ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                           }`}
                         >
@@ -1472,18 +1514,36 @@ export default function InvoicesModule({ user, onRefreshStats }: InvoicesModuleP
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <span className="font-bold text-slate-400">Scale / Zoom:</span>
+                    <div className="flex bg-slate-900 border border-slate-800 p-0.5 rounded">
+                      {(['auto', '100', '85', '75'] as const).map((sc) => (
+                        <button
+                          key={sc}
+                          onClick={() => setPreviewScale(sc)}
+                          className={`px-2 py-1 text-[9px] font-extrabold uppercase rounded transition-all cursor-pointer ${
+                            previewScale === sc ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                          }`}
+                          title={sc === 'auto' ? 'Auto-fit to viewport' : `Scale to ${sc}%`}
+                        >
+                          {sc === 'auto' ? 'Auto' : `${sc}%`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 sm:gap-2">
                     <span className="font-bold text-slate-400">Language:</span>
                     <div className="flex bg-slate-900 border border-slate-800 p-0.5 rounded">
-                      {(['en', 'ar', 'ur', 'hi', 'bilingual'] as const).map((lang) => (
+                      {(['en', 'ar', 'ur', 'bn', 'hi', 'bilingual'] as const).map((lang) => (
                         <button
                           key={lang}
                           onClick={() => setPrintLanguage(lang)}
-                          className={`px-2.5 py-1 text-[9px] font-extrabold uppercase rounded transition-all cursor-pointer ${
+                          className={`px-2 sm:px-2.5 py-1 text-[9px] font-extrabold uppercase rounded transition-all cursor-pointer ${
                             printLanguage === lang ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                           }`}
                         >
-                          {lang === 'en' ? 'EN' : lang === 'ar' ? 'العربية' : lang === 'ur' ? 'اردو' : lang === 'hi' ? 'हिंदी' : 'Bilingual'}
+                          {lang === 'en' ? 'EN' : lang === 'ar' ? 'العربية' : lang === 'ur' ? 'اردو' : lang === 'bn' ? 'বাংলা' : lang === 'hi' ? 'हिंदी' : 'Bilingual'}
                         </button>
                       ))}
                     </div>
@@ -1636,7 +1696,7 @@ export default function InvoicesModule({ user, onRefreshStats }: InvoicesModuleP
               <div className={`flex-1 min-h-0 ${
                 viewMode === 'pdf' 
                   ? 'p-0 bg-slate-950/40 font-sans overflow-hidden flex flex-col' 
-                  : 'overflow-y-auto ' + (printSize !== 'a4' ? 'bg-slate-950/60 p-6 flex justify-center items-start' : 'bg-white')
+                  : 'overflow-y-auto bg-slate-950/60 p-2 sm:p-4 md:p-6 flex justify-center items-start'
               }`}>
                 {viewMode === 'pdf' && (
                   pdfPreviewUrl ? (
@@ -1685,283 +1745,315 @@ export default function InvoicesModule({ user, onRefreshStats }: InvoicesModuleP
                   )
                 )}
 
-                <div className={viewMode === 'pdf' ? 'hidden' : 'w-full'}>
+                <div className={viewMode === 'pdf' ? 'hidden' : 'w-full flex justify-center items-start'}>
+                  {/* Flexible Scaling Wrapper */}
                   <div 
-                    id="printable-area" 
-                    className={`overflow-y-auto bg-white text-slate-800 font-sans select-text shadow-xl transition-all duration-300 ${
-                      printSize === 'a4' 
-                        ? 'p-8 space-y-6 w-full max-w-full' 
-                        : printSize === '80mm'
-                        ? 'p-5 space-y-4 w-[80mm] border border-dashed border-slate-300 text-[10px] rounded-sm'
-                        : 'p-3.5 space-y-3.5 w-[58mm] border border-dashed border-slate-300 text-[8px] rounded-sm'
-                    }`}
-                    style={{
-                      direction: isLayoutRtl ? 'rtl' : 'ltr'
-                    }}
+                    className="w-full flex justify-center transition-transform duration-200 origin-top"
+                    style={previewScale !== 'auto' ? {
+                      transform: `scale(${Number(previewScale) / 100})`,
+                      width: `${100 / (Number(previewScale) / 100)}%`,
+                      transformOrigin: 'top center'
+                    } : undefined}
                   >
-                  {/* Header block logo / info */}
-                  <div className={`flex border-b border-dashed border-slate-200 pb-5 ${
-                    printSize === 'a4' ? 'flex-row justify-between items-start gap-4' : 'flex-col items-center text-center gap-3'
-                  }`}>
-                    <div className={printSize === 'a4' ? (isLayoutRtl ? 'text-right' : 'text-left') : 'text-center'}>
-                      {(showLogoOnInvoice && user.logoUrl) ? (
-                        <img src={user.logoUrl} alt="Logo" className="max-h-12 max-w-[180px] object-contain mb-2" referrerPolicy="no-referrer" />
-                      ) : (
-                        <h1 className="text-lg font-black text-indigo-900 leading-tight uppercase tracking-tight">{user.companyName}</h1>
-                      )}
-                      <p className="text-[10px] text-slate-500 mt-1 max-w-sm whitespace-pre-line leading-relaxed">
-                        {user.address || 'Company Administrative Address'}<br />
-                        Phone: {user.phone || 'Phone Contact'} | Email: {user.email}
-                      </p>
-                      {user.taxNumber && (
-                        <p className="text-[9px] font-bold text-indigo-950 mt-1 uppercase">
-                          {getBilingualString('trn', printLanguage)}: <span className="font-mono text-xs">{user.taxNumber}</span>
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Top QR code for standard A4 layout */}
-                    {printSize === 'a4' && (
-                      <div className="flex flex-col items-center justify-center border border-slate-200 p-1 bg-white rounded-lg select-none shrink-0 w-[100px] h-[100px]">
-                        <img 
-                          src={qrCodeUrl} 
-                          alt="ZATCA Verification QR" 
-                          className="w-full h-full object-contain"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                    )}
-
-                    <div className={printSize === 'a4' ? (isLayoutRtl ? 'text-left' : 'text-right') : 'text-center w-full pt-3 border-t border-dashed border-slate-200'}>
-                      <h2 className="text-sm font-black text-slate-900 uppercase tracking-wider">
-                        {getBilingualString('invoiceTitle', printLanguage)}
-                      </h2>
-                      
-                      {/* Beautifully aligned metadata box for proper visual sequence */}
-                      <div className={`mt-3 inline-flex flex-col text-left border border-slate-100 rounded-lg p-2.5 bg-slate-50/50 min-w-[200px] space-y-1.5 ${
-                        isLayoutRtl ? 'text-right' : 'text-left'
-                      }`} style={{ direction: isLayoutRtl ? 'rtl' : 'ltr' }}>
-                        <div className="flex justify-between items-center gap-4 border-b border-slate-100 pb-1">
-                          <span className="text-slate-500 font-bold font-sans text-[9px] uppercase tracking-wider">
-                            {getBilingualString('invoiceNumber', printLanguage)}:
-                          </span>
-                          <span className="font-extrabold text-indigo-950 font-mono text-[11px]">{activeInvoice.invoiceNumber}</span>
+                    <div 
+                      id="printable-area" 
+                      className={`overflow-y-auto bg-white text-slate-800 font-sans select-text shadow-2xl transition-all duration-300 ${
+                        printSize === 'a4' 
+                          ? 'p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-6 w-full max-w-full md:max-w-4xl mx-auto rounded-none sm:rounded-xl' 
+                          : printSize === '80mm'
+                          ? 'p-3 sm:p-4 space-y-3.5 w-full max-w-[80mm] border border-dashed border-slate-300 text-[10px] rounded-sm mx-auto'
+                          : 'p-2.5 sm:p-3 space-y-3 w-full max-w-[58mm] border border-dashed border-slate-300 text-[8px] rounded-sm mx-auto'
+                      }`}
+                      style={{
+                        direction: isLayoutRtl ? 'rtl' : 'ltr'
+                      }}
+                    >
+                      {/* Header block logo / info */}
+                      <div className={`border-b border-dashed border-slate-200 pb-4 sm:pb-5 ${
+                        printSize === 'a4' 
+                          ? 'grid grid-cols-1 sm:grid-cols-12 print:grid-cols-12 gap-3 sm:gap-4 items-start' 
+                          : 'flex flex-col items-center text-center gap-2.5 pb-3'
+                      }`}>
+                        {/* Company Bio */}
+                        <div className={`min-w-0 ${
+                          printSize === 'a4' 
+                            ? 'sm:col-span-6 md:col-span-6 print:col-span-6 ' + (isLayoutRtl ? 'text-right' : 'text-left') 
+                            : 'text-center'
+                        }`}>
+                          {(showLogoOnInvoice && user.logoUrl) ? (
+                            <img src={user.logoUrl} alt="Logo" className="max-h-12 max-w-[180px] object-contain mb-2" referrerPolicy="no-referrer" />
+                          ) : (
+                            <h1 className="text-base sm:text-lg font-black text-indigo-900 leading-tight uppercase tracking-tight break-words">{user.companyName}</h1>
+                          )}
+                          <p className="text-[10px] text-slate-500 mt-1 max-w-sm whitespace-pre-line leading-relaxed break-words">
+                            {user.address || 'Company Administrative Address'}<br />
+                            Phone: {user.phone || 'Phone Contact'} | Email: {user.email}
+                          </p>
+                          {user.taxNumber && (
+                            <p className="text-[9px] font-bold text-indigo-950 mt-1 uppercase break-words">
+                              {getBilingualString('trn', printLanguage)}: <span className="font-mono text-xs">{user.taxNumber}</span>
+                            </p>
+                          )}
                         </div>
-                        <div className={`flex justify-between items-center gap-4 pb-1 ${activeInvoice.dueDate ? 'border-b border-slate-100' : ''}`}>
-                          <span className="text-slate-500 font-bold font-sans text-[9px] uppercase tracking-wider">
-                            {getBilingualString('date', printLanguage)}:
-                          </span>
-                          <span className="font-bold text-slate-800 font-mono text-[10px]">{activeInvoice.date}</span>
-                        </div>
-                        {activeInvoice.dueDate && (
-                          <div className="flex justify-between items-center gap-4 text-rose-600 font-bold pt-0.5">
-                            <span className="font-bold font-sans text-[9px] uppercase tracking-wider">
-                              {getBilingualString('dueDate', printLanguage)}:
-                            </span>
-                            <span className="font-extrabold font-mono text-[10px]">{activeInvoice.dueDate}</span>
+
+                        {/* Top QR code for standard A4 layout */}
+                        {printSize === 'a4' && (
+                          <div className="sm:col-span-2 md:col-span-2 print:col-span-2 flex justify-start sm:justify-center print:justify-center items-center my-1 sm:my-0">
+                            <div className="flex flex-col items-center justify-center border border-slate-200 p-1 bg-white rounded-lg select-none shrink-0 w-20 h-20 sm:w-22 sm:h-22 md:w-24 md:h-24 print:w-24 print:h-24 shadow-xs">
+                              <img 
+                                src={qrCodeUrl} 
+                                alt="ZATCA Verification QR" 
+                                className="w-full h-full object-contain"
+                                referrerPolicy="no-referrer"
+                              />
+                            </div>
                           </div>
                         )}
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* Billed details */}
-                  <div className={`p-3.5 rounded-lg border ${
-                    printSize === 'a4' 
-                      ? 'bg-slate-50 border-slate-100 flex justify-between items-start text-[10px] gap-4' 
-                      : 'bg-white border-dashed border-slate-250 flex flex-col space-y-2.5 text-[9px] w-full text-center items-center'
-                  }`}>
-                    <div className={printSize === 'a4' ? (isLayoutRtl ? 'text-right' : 'text-left') : 'text-center'}>
-                      <h3 className="uppercase font-bold text-slate-500 tracking-wider mb-1">
-                        {getBilingualValue('billedTo', printLanguage)}
-                      </h3>
-                      <p className="font-extrabold text-slate-900 text-sm">{activeInvoice.customerName}</p>
-                      {(() => {
-                        const custMeta = customers.find(c => c.id === activeInvoice.customerId);
-                        if (custMeta) {
-                          return (
-                            <p className="text-[9px] text-slate-500 mt-1 max-w-md whitespace-pre-wrap leading-relaxed">
-                              Phone: {custMeta.phone} | Email: {custMeta.email}<br />
-                              Address: {custMeta.address}
-                              {custMeta.vatNumber && (
-                                <span className="block font-bold text-slate-700 mt-1">
-                                  {getBilingualString('buyerTrn', printLanguage)}: {custMeta.vatNumber}
-                                </span>
-                              )}
-                            </p>
-                          );
-                        }
-                        if (activeInvoice.customerId === 'walk-in') {
-                          return (
-                            <p className="text-[9px] text-slate-500 mt-1 max-w-md leading-relaxed italic">
-                              Counter Walk-In Customer Account
-                            </p>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                    <div className={printSize === 'a4' ? (isLayoutRtl ? 'text-left' : 'text-right') : 'text-center pt-2.5 border-t border-dashed border-slate-150 w-full'}>
-                      <h3 className="uppercase font-bold text-slate-400 tracking-wider mb-1">
-                        {getBilingualValue('status', printLanguage)}
-                      </h3>
-                      <span className={`px-2.5 py-0.5 font-extrabold rounded text-[9px] border inline-block ${
-                        activeInvoice.status === 'paid' 
-                          ? 'bg-emerald-50 border-emerald-200 text-emerald-600' 
-                          : 'bg-rose-50 border-rose-200 text-rose-500'
-                      }`}>
-                        {activeInvoice.status === 'paid' ? getBilingualString('paidStatus', printLanguage) : getBilingualString('unpaidStatus', printLanguage)}
-                      </span>
-                      {activeInvoice.status === 'paid' && activeInvoice.paymentMethod && (
-                        <p className="text-[9px] text-slate-650 font-bold mt-1.5 uppercase font-mono">
-                          {getBilingualString('via', printLanguage)}: {activeInvoice.paymentMethod === 'cash' ? '💵 Cash' : '🏛️ Bank'}
-                        </p>
-                      )}
-                      {(() => {
-                        const linkedSale = salesList.find(s => s.invoiceId === activeInvoice.id);
-                        if (linkedSale) {
-                          return (
-                            <div className="mt-2 text-[8px] bg-indigo-50 border border-indigo-100 text-indigo-700 px-2.5 py-1 rounded-lg w-fit md:ml-auto max-w-full font-sans text-center md:text-right">
-                              <p className="font-extrabold flex items-center justify-center md:justify-end gap-1 leading-none text-[8px]">
-                                <span className="w-1 h-1 rounded-full bg-indigo-400 animate-pulse inline-block" />
-                                <span>Sales ledger:</span>
-                              </p>
-                              <span className="font-mono text-indigo-500 font-bold text-[7.5px] mt-0.5 block tracking-tight uppercase select-all">{linkedSale.id}</span>
+                        {/* Invoice Title & Number Metadata Card */}
+                        <div className={`min-w-0 ${
+                          printSize === 'a4' 
+                            ? 'sm:col-span-4 md:col-span-4 print:col-span-4 flex flex-col ' + (isLayoutRtl ? 'sm:items-start print:items-start text-left' : 'sm:items-end print:items-end text-right')
+                            : 'text-center w-full pt-2.5 border-t border-dashed border-slate-200'
+                        }`}>
+                          <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wider">
+                            {getBilingualString('invoiceTitle', printLanguage)}
+                          </h2>
+                          
+                          {/* Metadata box */}
+                          <div className={`mt-2 sm:mt-2.5 flex flex-col border border-slate-200/80 rounded-xl p-2 sm:p-2.5 bg-slate-50/70 w-full sm:max-w-xs print:max-w-xs space-y-1.5 ${
+                            isLayoutRtl ? 'text-right' : 'text-left'
+                          }`} style={{ direction: isLayoutRtl ? 'rtl' : 'ltr' }}>
+                            <div className="flex justify-between items-center gap-2 border-b border-slate-200/60 pb-1">
+                              <span className="text-slate-500 font-bold font-sans text-[9px] uppercase tracking-wider truncate">
+                                {getBilingualString('invoiceNumber', printLanguage)}:
+                              </span>
+                              <span className="font-extrabold text-indigo-950 font-mono text-[11px] shrink-0">{activeInvoice.invoiceNumber}</span>
                             </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                  </div>
-
-                  {/* Items listing table list */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-[10px]">
-                      <thead>
-                        <tr className="border-b-2 border-slate-300 text-slate-500 font-extrabold uppercase py-2">
-                          <th className={`py-2 pb-1.5 ${alignLeftClass} font-black`}>
-                            {getBilingualValue('description', printLanguage)}
-                          </th>
-                          <th className={`py-2 pb-1.5 ${alignRightClass} font-black`}>
-                            {getBilingualValue('qty', printLanguage)}
-                          </th>
-                          <th className={`py-2 pb-1.5 ${alignRightClass} font-black`}>
-                            {getBilingualValue('price', printLanguage)}
-                          </th>
-                          <th className={`py-2 pb-1.5 ${alignRightClass} font-black`}>
-                            {getBilingualValue('total', printLanguage)}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {activeInvoice.items.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50 font-medium">
-                            <td className={`py-2 border-b border-slate-100 font-extrabold text-slate-800 ${alignLeftClass}`}>{item.productName}</td>
-                            <td className={`py-2 border-b border-slate-100 font-mono text-slate-600 ${alignRightClass}`}>{item.quantity}</td>
-                            <td className={`py-2 border-b border-slate-100 font-mono text-slate-600 ${alignRightClass}`}>{formatMoney(item.price)}</td>
-                            <td className={`py-2 border-b border-slate-100 font-bold font-mono text-slate-800 ${alignRightClass}`}>{formatMoney(item.total)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Calculations footer */}
-                  <div className={`flex pt-4 flex-wrap border-t border-slate-200 gap-5 ${
-                    printSize === 'a4' ? 'justify-between items-start' : 'flex-col items-center text-center'
-                  }`}>
-                    {/* Notes Box Column */}
-                    <div className={`text-[9px] text-slate-500 italic leading-relaxed ${
-                      printSize === 'a4' ? 'max-w-xs text-left' : 'w-full text-center border-b border-dashed border-slate-150 pb-3'
-                    }`} style={{ direction: isLayoutRtl ? 'rtl' : 'ltr' }}>
-                      <span className="font-bold text-slate-800 block uppercase tracking-wider mb-1">
-                        {getBilingualString('notes', printLanguage)}
-                      </span>
-                      <p className="whitespace-pre-line text-[9px] font-sans">
-                        {activeInvoice.notes || 'No custom payment instructions attached.'}
-                      </p>
-                    </div>
-
-                    {/* Math totals table alignment */}
-                    <div className={`w-full sm:w-64 space-y-2 text-[10px] text-slate-700 ${
-                      printSize === 'a4' ? (isLayoutRtl ? 'mr-auto' : 'ml-auto') : 'mx-auto'
-                    }`}>
-                      <div className="flex justify-between border-b border-dashed border-slate-100 pb-1 items-center gap-4">
-                        {getBilingualValue('subtotal', printLanguage)}
-                        <span className="font-bold font-mono text-slate-900">{formatMoney(activeInvoice.subtotal)}</span>
-                      </div>
-                      <div className="flex justify-between border-b border-dashed border-slate-100 pb-1 items-center gap-4">
-                        <div className="flex flex-col items-start">
-                          {getBilingualValue('tax', printLanguage)}
-                          <span className="text-[9px] text-indigo-500 font-mono font-bold">({activeInvoice.taxRate}%)</span>
+                            <div className={`flex justify-between items-center gap-2 pb-1 ${activeInvoice.dueDate ? 'border-b border-slate-200/60' : ''}`}>
+                              <span className="text-slate-500 font-bold font-sans text-[9px] uppercase tracking-wider truncate">
+                                {getBilingualString('date', printLanguage)}:
+                              </span>
+                              <span className="font-bold text-slate-800 font-mono text-[10px] shrink-0">{activeInvoice.date}</span>
+                            </div>
+                            {activeInvoice.dueDate && (
+                              <div className="flex justify-between items-center gap-2 text-rose-600 font-bold pt-0.5">
+                                <span className="font-bold font-sans text-[9px] uppercase tracking-wider truncate">
+                                  {getBilingualString('dueDate', printLanguage)}:
+                                </span>
+                                <span className="font-extrabold font-mono text-[10px] shrink-0">{activeInvoice.dueDate}</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <span className="font-bold font-mono text-slate-900">+{formatMoney(activeInvoice.taxAmount)}</span>
                       </div>
-                      {activeInvoice.discount > 0 && (
-                        <div className="flex justify-between border-b border-rose-100 pb-1 text-rose-600 items-center gap-4">
-                          {getBilingualValue('discount', printLanguage)}
-                          <span className="font-bold font-mono">-{formatMoney(activeInvoice.discount)}</span>
+
+                      {/* Billed details */}
+                      <div className={`p-3 sm:p-3.5 rounded-xl border ${
+                        printSize === 'a4' 
+                          ? 'bg-slate-50/70 border-slate-200/80 grid grid-cols-1 sm:grid-cols-12 print:grid-cols-12 gap-3 sm:gap-4 text-[10px]' 
+                          : 'bg-white border-dashed border-slate-250 flex flex-col space-y-2 text-[9px] w-full text-center items-center'
+                      }`}>
+                        <div className={`min-w-0 ${printSize === 'a4' ? 'sm:col-span-7 print:col-span-7 ' + (isLayoutRtl ? 'text-right' : 'text-left') : 'text-center'}`}>
+                          <h3 className="uppercase font-bold text-slate-500 tracking-wider mb-1 text-[9px]">
+                            {getBilingualValue('billedTo', printLanguage)}
+                          </h3>
+                          <p className="font-extrabold text-slate-900 text-xs sm:text-sm break-words">{activeInvoice.customerName}</p>
+                          {(() => {
+                            const custMeta = customers.find(c => c.id === activeInvoice.customerId);
+                            if (custMeta) {
+                              return (
+                                <p className="text-[9px] text-slate-500 mt-1 max-w-md whitespace-pre-wrap leading-relaxed break-words">
+                                  Phone: {custMeta.phone} | Email: {custMeta.email}<br />
+                                  Address: {custMeta.address}
+                                  {custMeta.vatNumber && (
+                                    <span className="block font-bold text-slate-700 mt-1">
+                                      {getBilingualString('buyerTrn', printLanguage)}: {custMeta.vatNumber}
+                                    </span>
+                                  )}
+                                </p>
+                              );
+                            }
+                            if (activeInvoice.customerId === 'walk-in') {
+                              return (
+                                <p className="text-[9px] text-slate-500 mt-1 max-w-md leading-relaxed italic">
+                                  Counter Walk-In Customer Account
+                                </p>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
+                        <div className={`min-w-0 ${printSize === 'a4' ? 'sm:col-span-5 print:col-span-5 flex flex-col ' + (isLayoutRtl ? 'sm:items-start print:items-start text-left' : 'sm:items-end print:items-end text-right') : 'text-center pt-2 border-t border-dashed border-slate-150 w-full'}`}>
+                          <h3 className="uppercase font-bold text-slate-400 tracking-wider mb-1 text-[9px]">
+                            {getBilingualValue('status', printLanguage)}
+                          </h3>
+                          <span className={`px-2.5 py-0.5 font-extrabold rounded text-[9px] border inline-block ${
+                            activeInvoice.status === 'paid' 
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-600' 
+                              : 'bg-rose-50 border-rose-200 text-rose-500'
+                          }`}>
+                            {activeInvoice.status === 'paid' ? getBilingualString('paidStatus', printLanguage) : getBilingualString('unpaidStatus', printLanguage)}
+                          </span>
+                          {activeInvoice.status === 'paid' && activeInvoice.paymentMethod && (
+                            <p className="text-[9px] text-slate-650 font-bold mt-1.5 uppercase font-mono">
+                              {getBilingualString('via', printLanguage)}: {activeInvoice.paymentMethod === 'cash' ? '💵 Cash' : '🏛️ Bank'}
+                            </p>
+                          )}
+                          {(() => {
+                            const linkedSale = salesList.find(s => s.invoiceId === activeInvoice.id);
+                            if (linkedSale) {
+                              return (
+                                <div className="mt-2 text-[8px] bg-indigo-50 border border-indigo-100 text-indigo-700 px-2 py-1 rounded-lg w-fit max-w-full font-sans">
+                                  <p className="font-extrabold flex items-center gap-1 leading-none text-[8px]">
+                                    <span className="w-1 h-1 rounded-full bg-indigo-400 animate-pulse inline-block" />
+                                    <span>Sales ledger:</span>
+                                  </p>
+                                  <span className="font-mono text-indigo-500 font-bold text-[7.5px] mt-0.5 block tracking-tight uppercase select-all truncate">{linkedSale.id}</span>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Items listing table list */}
+                      <div className="overflow-x-auto print:overflow-visible w-full">
+                        <table className="w-full text-left text-[10px] sm:text-xs print:text-[10px] border-collapse table-auto sm:table-fixed">
+                          <thead>
+                            <tr className="border-b-2 border-slate-300 text-slate-500 font-extrabold uppercase py-2">
+                              <th className={`py-2 px-1.5 sm:px-2 pb-1.5 ${alignLeftClass} font-black w-[45%] sm:w-[50%] print:w-[50%]`}>
+                                {getBilingualValue('description', printLanguage)}
+                              </th>
+                              <th className={`py-2 px-1 sm:px-2 pb-1.5 ${alignRightClass} font-black w-[15%] sm:w-[12%] print:w-[12%]`}>
+                                {getBilingualValue('qty', printLanguage)}
+                              </th>
+                              <th className={`py-2 px-1.5 sm:px-2 pb-1.5 ${alignRightClass} font-black w-[20%] sm:w-[18%] print:w-[18%]`}>
+                                {getBilingualValue('price', printLanguage)}
+                              </th>
+                              <th className={`py-2 px-1.5 sm:px-2 pb-1.5 ${alignRightClass} font-black w-[20%] sm:w-[20%] print:w-[20%]`}>
+                                {getBilingualValue('total', printLanguage)}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {activeInvoice.items.map((item, idx) => (
+                              <tr key={idx} className="hover:bg-slate-50 font-medium">
+                                <td className={`py-2 px-1.5 sm:px-2 border-b border-slate-100 font-extrabold text-slate-800 break-words min-w-0 ${alignLeftClass}`}>{item.productName}</td>
+                                <td className={`py-2 px-1 sm:px-2 border-b border-slate-100 font-mono text-slate-600 whitespace-nowrap ${alignRightClass}`}>{item.quantity}</td>
+                                <td className={`py-2 px-1.5 sm:px-2 border-b border-slate-100 font-mono text-slate-600 whitespace-nowrap ${alignRightClass}`}>{formatMoney(item.price)}</td>
+                                <td className={`py-2 px-1.5 sm:px-2 border-b border-slate-100 font-bold font-mono text-slate-800 whitespace-nowrap ${alignRightClass}`}>{formatMoney(item.total)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Calculations footer */}
+                      <div className={`pt-4 border-t border-slate-200 gap-4 sm:gap-6 ${
+                        printSize === 'a4' 
+                          ? 'grid grid-cols-1 sm:grid-cols-12 print:grid-cols-12 items-start' 
+                          : 'flex flex-col items-center text-center'
+                      }`}>
+                        {/* Notes Box Column */}
+                        <div className={`min-w-0 text-[9px] sm:text-[10px] text-slate-500 italic leading-relaxed ${
+                          printSize === 'a4' 
+                            ? 'sm:col-span-6 print:col-span-6 bg-slate-50/70 p-3 sm:p-3.5 rounded-xl border border-slate-100/90 ' + (isLayoutRtl ? 'text-right' : 'text-left') 
+                            : 'w-full text-center border-b border-dashed border-slate-150 pb-3'
+                        }`} style={{ direction: isLayoutRtl ? 'rtl' : 'ltr' }}>
+                          <span className="font-bold text-slate-800 block uppercase tracking-wider mb-1 not-italic text-[9px]">
+                            {getBilingualString('notes', printLanguage)}
+                          </span>
+                          <p className="whitespace-pre-line font-sans break-words">
+                            {activeInvoice.notes || 'No custom payment instructions attached.'}
+                          </p>
+                        </div>
+
+                        {/* Math totals table alignment */}
+                        <div className={`w-full min-w-0 ${
+                          printSize === 'a4' 
+                            ? 'sm:col-span-6 print:col-span-6 flex flex-col ' + (isLayoutRtl ? 'sm:items-start print:items-start' : 'sm:items-end print:items-end') 
+                            : 'mx-auto'
+                        }`}>
+                          <div className="w-full sm:max-w-xs space-y-1.5 sm:space-y-2 text-[10px] sm:text-xs text-slate-700 bg-slate-50/60 p-3 sm:p-3.5 rounded-xl border border-slate-100/90">
+                            <div className="flex justify-between border-b border-dashed border-slate-200/80 pb-1 items-center gap-2">
+                              <span className="truncate">{getBilingualValue('subtotal', printLanguage)}</span>
+                              <span className="font-bold font-mono text-slate-900 shrink-0">{formatMoney(activeInvoice.subtotal)}</span>
+                            </div>
+                            <div className="flex justify-between border-b border-dashed border-slate-200/80 pb-1 items-center gap-2">
+                              <div className="flex items-center gap-1 min-w-0">
+                                <span className="truncate">{getBilingualValue('tax', printLanguage)}</span>
+                                <span className="text-[9px] text-indigo-500 font-mono font-bold shrink-0">({activeInvoice.taxRate}%)</span>
+                              </div>
+                              <span className="font-bold font-mono text-slate-900 shrink-0">+{formatMoney(activeInvoice.taxAmount)}</span>
+                            </div>
+                            {activeInvoice.discount > 0 && (
+                              <div className="flex justify-between border-b border-rose-100 pb-1 text-rose-600 items-center gap-2">
+                                <span className="truncate">{getBilingualValue('discount', printLanguage)}</span>
+                                <span className="font-bold font-mono shrink-0">-{formatMoney(activeInvoice.discount)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between text-indigo-950 border-t-2 border-slate-300 pt-2 font-black text-xs sm:text-sm items-center gap-2">
+                              <span className="truncate">{getBilingualValue('totalPayable', printLanguage)}</span>
+                              <span className="font-mono shrink-0">{formatMoney(activeInvoice.total)}</span>
+                            </div>
+                            <div className="flex justify-between border-b border-dashed border-slate-200/80 pb-1 text-slate-500 mt-1 items-center gap-2 text-[10px]">
+                              <span className="truncate">{getBilingualValue('amountPaid', printLanguage)}</span>
+                              <span className="font-semibold font-mono text-slate-800 shrink-0">{formatMoney(activeInvoice.amountPaid !== undefined ? activeInvoice.amountPaid : (activeInvoice.status === 'paid' ? activeInvoice.total : 0))}</span>
+                            </div>
+                            <div className="flex justify-between text-rose-600 border-b border-rose-100 pb-1 font-bold items-center gap-2 text-[10px]">
+                              <span className="truncate">{getBilingualValue('balanceDue', printLanguage)}</span>
+                              <span className="font-bold font-mono text-rose-700 shrink-0">{formatMoney(activeInvoice.balanceDue !== undefined ? activeInvoice.balanceDue : (activeInvoice.status === 'paid' ? 0 : activeInvoice.total))}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* BOTTOM QR Code for narrow POS receipt rolls */}
+                      {printSize !== 'a4' && (
+                        <div className="flex flex-col items-center justify-center pt-3 border-t border-dashed border-slate-200 mt-2 space-y-1.5 pb-2">
+                          <div className="flex flex-col items-center justify-center border border-slate-200 p-1 bg-white rounded-lg w-20 h-20 sm:w-24 sm:h-24">
+                            <img 
+                              src={qrCodeUrl} 
+                              alt="Verification QR" 
+                              className="w-full h-full object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <span className="text-[8px] text-slate-500 uppercase tracking-widest font-black">
+                            {printLanguage === 'ar' 
+                              ? 'فاتورة ضريبة مبسطة معتمدة' 
+                              : printLanguage === 'en' 
+                              ? 'VERIFIED E-INVOICE' 
+                              : 'VERIFIED E-INVOICE'}
+                          </span>
                         </div>
                       )}
-                      <div className="flex justify-between text-indigo-950 border-t-2 border-slate-300 pt-2 font-black text-xs items-center gap-4">
-                        {getBilingualValue('totalPayable', printLanguage)}
-                        <span className="font-mono text-sm">{formatMoney(activeInvoice.total)}</span>
-                      </div>
-                      <div className="flex justify-between border-b border-dashed border-slate-100 pb-1 text-slate-500 mt-1 items-center gap-4">
-                        {getBilingualValue('amountPaid', printLanguage)}
-                        <span className="font-semibold font-mono text-slate-800">{formatMoney(activeInvoice.amountPaid !== undefined ? activeInvoice.amountPaid : (activeInvoice.status === 'paid' ? activeInvoice.total : 0))}</span>
-                      </div>
-                      <div className="flex justify-between text-rose-600 border-b border-rose-100 pb-1 font-bold items-center gap-4">
-                        {getBilingualValue('balanceDue', printLanguage)}
-                        <span className="font-bold font-mono text-rose-700">{formatMoney(activeInvoice.balanceDue !== undefined ? activeInvoice.balanceDue : (activeInvoice.status === 'paid' ? 0 : activeInvoice.total))}</span>
+
+                      {/* Appreciation Note replacing old Signatures block */}
+                      {printSize === 'a4' && (
+                        <div className="pt-6 sm:pt-8 pb-3 text-center select-none" style={{ direction: isLayoutRtl ? 'rtl' : 'ltr' }}>
+                          <div className="inline-block bg-slate-50/50 border border-slate-100 rounded-xl px-4 sm:px-6 py-3 sm:py-4 max-w-xl mx-auto">
+                            <p className="text-indigo-950 font-extrabold text-xs tracking-tight font-sans">
+                              Thank You for Your Business!
+                            </p>
+                            <p className="text-slate-500 font-medium text-[10px] mt-1 font-sans">
+                              We genuinely appreciate your partnership. Your trust is our greatest motivation, and we look forward to serving you again.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Bottom footer print area */}
+                      <div className="text-center border-t border-slate-200 pt-4 sm:pt-5 text-[8px] text-slate-400 uppercase tracking-widest leading-loose shrink-0 break-words">
+                        {user.companyName} • {user.email} • {user.phone} <br />
+                        {getBilingualString('thankYou', printLanguage)}
                       </div>
                     </div>
-                  </div>
-
-                  {/* BOTTOM QR Code for narrow POS receipt rolls */}
-                  {printSize !== 'a4' && (
-                    <div className="flex flex-col items-center justify-center pt-4 border-t border-dashed border-slate-200 mt-2 space-y-1.5 pb-2">
-                      <div className="flex flex-col items-center justify-center border border-slate-200 p-1 bg-white rounded-lg w-[110px] h-[110px]">
-                        <img 
-                          src={qrCodeUrl} 
-                          alt="Verification QR" 
-                          className="w-full h-full object-contain"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                      <span className="text-[8px] text-slate-500 uppercase tracking-widest font-black">
-                        {printLanguage === 'ar' 
-                          ? 'فاتورة ضريبة مبسطة معتمدة' 
-                          : printLanguage === 'en' 
-                          ? 'VERIFIED E-INVOICE' 
-                          : 'VERIFIED E-INVOICE'}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Appreciation Note replacing old Signatures block */}
-                  {printSize === 'a4' && (
-                    <div className="pt-10 pb-4 text-center select-none" style={{ direction: isLayoutRtl ? 'rtl' : 'ltr' }}>
-                      <div className="inline-block bg-slate-50/50 border border-slate-100 rounded-xl px-6 py-4 max-w-xl mx-auto">
-                        <p className="text-indigo-950 font-extrabold text-xs tracking-tight font-sans">
-                          Thank You for Your Business!
-                        </p>
-                        <p className="text-slate-500 font-medium text-[10px] mt-1 font-sans">
-                          We genuinely appreciate your partnership. Your trust is our greatest motivation, and we look forward to serving you again.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Bottom footer print area */}
-                  <div className="text-center border-t border-slate-200 pt-6 text-[8px] text-slate-400 uppercase tracking-widest leading-loose shrink-0">
-                    {user.companyName} • {user.email} • {user.phone} <br />
-                    {getBilingualString('thankYou', printLanguage)}
                   </div>
                 </div>
               </div>
-            </div>
             </motion.div>
           </div>
         );

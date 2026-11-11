@@ -111,23 +111,44 @@ function getTenantContext(tenantId: string) {
   };
 }
 
+function getPort(): number {
+  const portArgIdx = process.argv.indexOf("--port");
+  if (portArgIdx !== -1 && process.argv[portArgIdx + 1]) {
+    const parsed = parseInt(process.argv[portArgIdx + 1], 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  if (process.env.PORT) {
+    const parsed = parseInt(process.env.PORT, 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return 3000;
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = getPort();
 
   // Body parsers
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // Load database state from Firestore on startup
-  let stateLoaded = false;
-  if (!isFirestoreDisabled) {
+  // Load fast local backup state immediately so server starts in milliseconds
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      databaseState = JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
+      console.log("Loaded local persistence backup from:", DB_FILE);
+    }
+  } catch (e) {
+    console.error("Failed to read local backup file:", e);
+  }
+
+  // Asynchronously sync state from Firebase Firestore in background with parallel Promise.all
+  const loadFirestoreAsync = async () => {
+    if (isFirestoreDisabled) return;
     try {
-      console.log("Loading Omni-Suite state from Firebase Firestore...");
+      console.log("Syncing Omni-Suite state from Firebase Firestore in background...");
       const firestoreDb = getFirestoreDb();
-      if (!firestoreDb) {
-        throw new Error("Firestore is disabled or could not be initialized.");
-      }
+      if (!firestoreDb) return;
       const keys = [
         "biz_suite_tenants",
         "biz_suite_customers",
@@ -138,39 +159,36 @@ async function startServer() {
         "biz_suite_access_logs",
         "biz_suite_support_chats",
         "biz_suite_active_sessions",
-        "biz_suite_purchases"
+        "biz_suite_purchases",
+        "biz_suite_custom_invites"
       ];
-      for (const key of keys) {
-        const docRef = doc(firestoreDb, "app_state", key);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          databaseState[key] = docSnap.data().data || [];
-        } else {
-          databaseState[key] = [];
-        }
-      }
-      console.log(`Successfully loaded ${keys.length} keys from Firebase Firestore.`);
-      stateLoaded = true;
+      await Promise.all(
+        keys.map(async (key) => {
+          const docRef = doc(firestoreDb, "app_state", key);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data().data || [];
+            if (Array.isArray(data) && data.length > 0) {
+              databaseState[key] = data;
+            } else if (!databaseState[key]) {
+              databaseState[key] = [];
+            }
+          } else if (!databaseState[key]) {
+            databaseState[key] = [];
+          }
+        })
+      );
+      console.log(`Successfully synced ${keys.length} keys from Firebase Firestore.`);
     } catch (error) {
-      console.error("Error loading database state from Firestore, falling back to local file:", error);
+      console.error("Error loading database state from Firestore, operating on local state:", error);
       const errStr = String(error);
       if (errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("Quota") || errStr.includes("quota") || errStr.includes("resource-exhausted")) {
         console.warn("Firestore Quota exceeded on startup. Disabling cloud sync to run in High-Performance Local-Disk backup mode.");
         await disableFirestoreAndClose();
       }
     }
-  }
-
-  if (!stateLoaded) {
-    try {
-      if (fs.existsSync(DB_FILE)) {
-        databaseState = JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
-        console.log("Loaded backup state from:", DB_FILE);
-      }
-    } catch (e) {
-      console.error("Failed to read local backup file:", e);
-    }
-  }
+  };
+  loadFirestoreAsync();
 
   // API endpoints FIRST
   app.get("/api/health", (req, res) => {
@@ -198,7 +216,8 @@ async function startServer() {
         "biz_suite_access_logs",
         "biz_suite_support_chats",
         "biz_suite_active_sessions",
-        "biz_suite_purchases"
+        "biz_suite_purchases",
+        "biz_suite_custom_invites"
       ];
 
       let anyChange = false;
@@ -435,7 +454,10 @@ Special Feature: WhatsApp Action Integrations
   // Vite middleware for assets serving in development and production routing
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { 
+        middlewareMode: true,
+        hmr: false
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -447,8 +469,17 @@ Special Feature: WhatsApp Action Integrations
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+  });
+
+  server.on("error", (err: any) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`Port ${PORT} is in use. Exiting to allow supervisor restart.`);
+      process.exit(1);
+    } else {
+      console.error("Server listener error:", err);
+    }
   });
 }
 

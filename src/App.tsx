@@ -13,7 +13,14 @@ import {
   addChatMessage,
   markChatAsRead,
   getInvoices,
-  resolveTenantByCode
+  resolveTenantByCode,
+  provisionGuestPassTenant,
+  isGuestPassExpired,
+  getGuestPassRemainingHours,
+  requestGuestUpgradeToPermanent,
+  isTenantAccessExpired,
+  getCustomersGlobal,
+  updateTenantSettings
 } from './db';
 import { UserTenant, Customer, DashboardStats, Language } from './types';
 import { translations } from './translations';
@@ -56,9 +63,13 @@ import {
   MessageCircle,
   ShieldAlert,
   RefreshCw,
-  ShoppingCart
+  ShoppingCart,
+  Mail,
+  Home,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getBaseAppUrl, copyTextToClipboard, openExternalLink, buildWhatsAppLink } from './utils/links';
 
 function getApiUrl(path: string): string {
   let origin = '';
@@ -78,6 +89,14 @@ function getApiUrl(path: string): string {
   return (origin && origin !== 'null') ? `${origin}${path}` : path;
 }
 
+const APP_LANGUAGES: { id: Language; label: string; flag: string; nativeName: string }[] = [
+  { id: 'en', label: 'English', flag: '🇬🇧', nativeName: 'English' },
+  { id: 'ar', label: 'العربية', flag: '🇸🇦', nativeName: 'Arabic' },
+  { id: 'ur', label: 'اردو', flag: '🇵🇰', nativeName: 'Urdu' },
+  { id: 'bn', label: 'বাংলা', flag: '🇧🇩', nativeName: 'Bangla' },
+  { id: 'hi', label: 'हिन्दी', flag: '🇮🇳', nativeName: 'Hindi' },
+];
+
 export default function App() {
   const [user, setUser] = useState<UserTenant | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -89,8 +108,33 @@ export default function App() {
   // Mobile drawer state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
-  // Interface Language
-  const [lang, setLang] = useState<Language>('en');
+  // Interface Language with localStorage persistence
+  const [lang, setLang] = useState<Language>(() => {
+    try {
+      const saved = localStorage.getItem('biz_suite_language');
+      if (saved && ['en', 'ar', 'ur', 'bn', 'hi'].includes(saved)) {
+        return saved as Language;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return 'en';
+  });
+
+  const handleLanguageChange = (newLang: Language) => {
+    setLang(newLang);
+    try {
+      localStorage.setItem('biz_suite_language', newLang);
+    } catch (e) {
+      // ignore
+    }
+    if (user) {
+      const updatedUser: UserTenant = { ...user, language: newLang };
+      setUser(updatedUser);
+      setActiveUser(updatedUser);
+      updateTenantSettings({ language: newLang });
+    }
+  };
 
   // Customer session states
   const [activeCustomer, setActiveCustomer] = useState<Customer | null>(null);
@@ -105,6 +149,66 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
 
+  // 24-Hour Guest Upgrade Request Modal States
+  const [showGuestUpgradeModal, setShowGuestUpgradeModal] = useState(false);
+  const [upgradeCompanyName, setUpgradeCompanyName] = useState('');
+  const [upgradeEmail, setUpgradeEmail] = useState('');
+  const [upgradePhone, setUpgradePhone] = useState('');
+  const [upgradePassword, setUpgradePassword] = useState('');
+  const [upgradeNotes, setUpgradeNotes] = useState('');
+  const [upgradeSubmitting, setUpgradeSubmitting] = useState(false);
+  const [upgradeMsg, setUpgradeMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleOpenGuestUpgradeModal = () => {
+    if (user) {
+      setUpgradeCompanyName(user.companyName === 'Guest Explorer (24h Pass)' ? '' : user.companyName);
+      setUpgradeEmail(user.email.startsWith('guest-') ? '' : user.email);
+      setUpgradePhone(user.phone || '');
+      setUpgradePassword('');
+      setUpgradeNotes('');
+      setUpgradeMsg(null);
+    }
+    setShowGuestUpgradeModal(true);
+  };
+
+  const handleSubmitGuestUpgrade = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    if (!upgradeCompanyName.trim()) {
+      setUpgradeMsg({ type: 'error', text: 'Please provide your business or company name.' });
+      return;
+    }
+    if (!upgradeEmail.trim()) {
+      setUpgradeMsg({ type: 'error', text: 'Please provide your email address for permanent login.' });
+      return;
+    }
+
+    setUpgradeSubmitting(true);
+    const res = requestGuestUpgradeToPermanent(user.id, {
+      companyName: upgradeCompanyName.trim(),
+      email: upgradeEmail.trim().toLowerCase(),
+      phone: upgradePhone.trim(),
+      password: upgradePassword.trim() || undefined,
+      notes: upgradeNotes.trim()
+    });
+
+    setUpgradeSubmitting(false);
+    if (res.success && res.updatedUser) {
+      setUser(res.updatedUser);
+      setActiveUser(res.updatedUser);
+      setUpgradeMsg({ 
+        type: 'success', 
+        text: '🎉 آپ کی مستقل رسائی کی درخواست سپر ایڈمن (عرفان سعید) کو کامیابی سے بھیج دی گئی ہے۔ منظوری ملتے ہی آپ کا یہ اکاؤنٹ اور سارا ڈیٹا مستقل ہو جائے گا۔' 
+      });
+      setTimeout(() => {
+        setShowGuestUpgradeModal(false);
+        setUpgradeMsg(null);
+      }, 3500);
+    } else {
+      setUpgradeMsg({ type: 'error', text: res.message || 'Failed to submit upgrade request.' });
+    }
+  };
+
   function processUrlAndSessionParams() {
     // Check for Magic direct login links
     const params = new URLSearchParams(window.location.search);
@@ -114,6 +218,8 @@ export default function App() {
     const paramCustEmail = params.get('customerEmail');
     const paramCustPhone = params.get('customerPhone');
     const paramInvoiceId = params.get('invoiceId');
+    const paramMode = params.get('mode');
+    const paramAction = params.get('action');
 
     if (paramInvoiceId) {
       setInitialInvoiceId(paramInvoiceId);
@@ -140,9 +246,39 @@ export default function App() {
 
     let actionDone = false;
 
+    const isRegisterInvite = paramMode === 'register' || 
+      paramMode === 'signup' || 
+      paramAction === 'signup' || 
+      paramAction === 'register' || 
+      params.get('register') === 'true' || 
+      params.get('signup') === 'true' || 
+      params.has('invite') ||
+      params.has('inviteToken') ||
+      params.has('token') ||
+      params.has('inv');
+
+    const isVisitMode = paramMode === 'visit' || 
+      paramMode === 'guest' || 
+      paramMode === 'trial' || 
+      paramMode === 'visitor' ||
+      params.get('visit') === 'true' || 
+      params.get('guest') === 'true' || 
+      params.get('trial') === 'true' || 
+      params.has('visitor_pass') || 
+      params.has('pass') ||
+      params.has('visitPass') ||
+      params.has('guestPass');
+
+    if (isVisitMode || isRegisterInvite) {
+      // Strictly require email registration or login: reset active user session so authentication screen is displayed
+      setActiveUser(null);
+      setUser(null);
+      actionDone = true;
+    }
+
     // Check if there is any tenant identifier provided (via tenantId / code parameters, path code, or search key code)
     const rawSearchCode = (paramTenantId || paramCode || pathCode || queryKeyCode || '').trim();
-    if (rawSearchCode) {
+    if (!actionDone && rawSearchCode) {
       const matched = resolveTenantByCode(rawSearchCode, getTenants());
       if (matched && matched.isActive !== false && matched.isApproved !== false) {
         logAccess('merchant', matched.id, matched.companyName, matched.email, 'Accessed ERP workspace via magic direct link/shortcode');
@@ -289,7 +425,8 @@ export default function App() {
           'biz_suite_access_logs',
           'biz_suite_support_chats',
           'biz_suite_active_sessions',
-          'biz_suite_purchases'
+          'biz_suite_purchases',
+          'biz_suite_custom_invites'
         ];
         SYNC_KEYS.forEach(key => {
           if (cloudDb && cloudDb[key] !== undefined) {
@@ -315,7 +452,8 @@ export default function App() {
           'biz_suite_access_logs',
           'biz_suite_support_chats',
           'biz_suite_active_sessions',
-          'biz_suite_purchases'
+          'biz_suite_purchases',
+          'biz_suite_custom_invites'
         ];
         SYNC_KEYS.forEach(key => {
           const val = localStorage.getItem(key);
@@ -512,14 +650,18 @@ export default function App() {
   // Update Stats when transactions change
   const handleRefreshStats = () => {
     if (user) {
-      setStats(getDashboardStats(user.id));
+      setTimeout(() => {
+        setStats(getDashboardStats(user.id));
+      }, 0);
     }
   };
 
   useEffect(() => {
     const handleDbUpdate = () => {
       if (user) {
-        setStats(getDashboardStats(user.id));
+        setTimeout(() => {
+          setStats(getDashboardStats(user.id));
+        }, 0);
       }
     };
     window.addEventListener('db-update', handleDbUpdate);
@@ -530,14 +672,14 @@ export default function App() {
 
   const handleAuthSuccess = (authenticatedUser: UserTenant) => {
     setUser(authenticatedUser);
-    setLang(authenticatedUser.language);
+    handleLanguageChange(authenticatedUser.language);
     setStats(getDashboardStats(authenticatedUser.id));
     setActiveModule('dashboard');
   };
 
   const handleUpdateUser = (updatedUser: UserTenant) => {
     setUser(updatedUser);
-    setLang(updatedUser.language);
+    handleLanguageChange(updatedUser.language);
     setStats(getDashboardStats(updatedUser.id));
   };
 
@@ -667,10 +809,10 @@ export default function App() {
         onCustomerAuthSuccess={(customer, tenant) => {
           setActiveCustomer(customer);
           setCustomerTenant(tenant);
-          setLang(tenant.language);
+          handleLanguageChange(tenant.language);
         }}
         initialLanguage={lang}
-        onLanguageChange={setLang}
+        onLanguageChange={handleLanguageChange}
       />
     );
   }
@@ -700,6 +842,116 @@ export default function App() {
     return false;
   };
 
+  // Super Admin Approval Pending Screen for regular tenants
+  if (user && user.isApproved === false && user.email.toLowerCase() !== 'irfanksaeed@gmail.com') {
+    const waApprovalMsg = encodeURIComponent(
+      `Salam Super Admin Irfan Saeed!\n\nI have registered my business on Biz Suite ERP and require account approval for entry.\n\n🏢 Business: ${user.companyName}\n✉️ Email: ${user.email}\n📱 Phone: ${user.phone || 'N/A'}\n🆔 Account ID: ${user.id}\n\nPlease review and approve my account in the Admin Console. Thank you!`
+    );
+
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 sm:p-6">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95, y: 10 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          className="max-w-lg w-full glass p-6 sm:p-8 rounded-3xl border border-amber-500/40 text-center space-y-6 shadow-2xl relative overflow-hidden"
+        >
+          {/* Top highlight bar */}
+          <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 animate-pulse" />
+
+          <div className="w-18 h-18 rounded-3xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto text-4xl border border-amber-500/40 shadow-inner">
+            ⏳
+          </div>
+
+          <div className="space-y-2">
+            <span className="px-3 py-1 bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded-full text-xs font-mono font-black uppercase tracking-wider">
+              🔒 Super Admin Review Required
+            </span>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Business Registration Pending Approval
+            </h2>
+            <p className="text-sm text-amber-300 font-bold font-urdu leading-relaxed">
+              آپ کی بزنس رجسٹریشن سپر ایڈمن (عرفان سعید) کی منظوری کے لیے زیر التواء ہے
+            </p>
+          </div>
+
+          <div className="bg-slate-950/80 p-4 sm:p-5 rounded-2xl border border-white/10 text-xs text-slate-300 space-y-2.5 text-left font-mono">
+            <div className="flex justify-between border-b border-white/5 pb-1.5">
+              <span className="text-slate-400 font-sans">Business Name:</span>
+              <span className="text-white font-bold">{user.companyName}</span>
+            </div>
+            <div className="flex justify-between border-b border-white/5 pb-1.5">
+              <span className="text-slate-400 font-sans">Registered Email:</span>
+              <span className="text-indigo-300 font-bold select-all">{user.email}</span>
+            </div>
+            {user.phone && (
+              <div className="flex justify-between border-b border-white/5 pb-1.5">
+                <span className="text-slate-400 font-sans">Contact Phone:</span>
+                <span className="text-emerald-400 font-bold">{user.phone}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-slate-400 font-sans">Access Status:</span>
+              <span className="text-amber-400 font-black uppercase">Pending Approval Gate</span>
+            </div>
+            
+            <p className="text-[11.5px] text-slate-400 font-sans leading-relaxed pt-2 border-t border-white/5">
+              Security Protocol Notice: Every new business registration is reviewed by Super Admin Irfan Saeed. Once approved in the Admin Console, your account will be immediately active.
+            </p>
+          </div>
+
+          <div className="space-y-3 pt-1">
+            <button
+              onClick={async () => {
+                try {
+                  await pullServerSync();
+                } catch (e) {}
+                const refreshed = getTenants().find(t => t.id === user.id);
+                if (refreshed && refreshed.isApproved) {
+                  setActiveUser(refreshed);
+                  setUser(refreshed);
+                  setLang(refreshed.language);
+                  setStats(getDashboardStats(refreshed.id));
+                  setActiveModule('dashboard');
+                } else {
+                  alert("⏳ Status: Still pending Super Admin approval.\n\nآپ کا اکاؤنٹ ابھی منظور نہیں ہوا ہے۔ براہ کرم عرفان سعید سے واٹس ایپ یا ای میل پر رابطہ کریں۔");
+                }
+              }}
+              className="w-full py-3.5 bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black rounded-xl text-xs uppercase tracking-wider transition shadow-xl shadow-indigo-950/50 cursor-pointer flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4 text-indigo-200" />
+              <span>🔄 Check Approval Status / منظوری کا اسٹیٹس چیک کریں</span>
+            </button>
+
+            <a
+              href={`https://wa.me/?text=${waApprovalMsg}`}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2"
+            >
+              <MessageCircle className="w-4 h-4 text-emerald-100" />
+              <span>💬 Message Super Admin on WhatsApp</span>
+            </a>
+
+            <a
+              href={`mailto:irfanksaeed@gmail.com?subject=${encodeURIComponent(`Biz Suite Registration Approval - ${user.companyName}`)}&body=${encodeURIComponent(`Salam Irfan Saeed,\n\nPlease approve my business registration on Biz Suite ERP:\n\nBusiness: ${user.companyName}\nEmail: ${user.email}\nPhone: ${user.phone || 'N/A'}\nID: ${user.id}\n\nThank you!`)}`}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-850 text-indigo-300 hover:text-white font-bold rounded-xl text-xs uppercase tracking-wider transition border border-indigo-500/20 flex items-center justify-center gap-2"
+            >
+              <Mail className="w-4 h-4 text-indigo-400" />
+              <span>✉️ Email Super Admin (irfanksaeed@gmail.com)</span>
+            </a>
+
+            <button
+              onClick={handleSignOut}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-850 text-slate-400 hover:text-white font-bold rounded-xl text-xs transition cursor-pointer border border-white/5"
+            >
+              ← Log Out / واپس لاگ ان پر جائیں
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   const isBanned = user.isActive === false;
   const isSuspended = !!(user.tempSuspendedUntil && new Date(user.tempSuspendedUntil).getTime() > Date.now());
   const isTimeRestricted = checkTimeRestriction();
@@ -725,34 +977,42 @@ export default function App() {
             
             <div className="space-y-2">
               <h2 className="font-extrabold text-xl text-white tracking-tight">
-                {isBanned && "Account Suspended & Blocked"}
+                {isBanned && "Account Blocked / اکاؤنٹ بلاک ہے"}
                 {isSuspended && "Account Temporarily Suspended"}
                 {isTimeRestricted && "Access Hours Restricted"}
               </h2>
               <p className="text-xs text-rose-400 font-medium">
-                Surity & subscription rules are managed in real-time by the central administration.
+                آپ کا اکاؤنٹ سپر ایڈمن کی جانب سے بلاک یا معطل کر دیا گیا ہے
               </p>
             </div>
           </div>
 
           <div className="bg-slate-950/60 p-5 rounded-2xl border border-rose-500/10 space-y-4">
             <h3 className="text-[10px] font-bold text-rose-300 uppercase tracking-wider flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> Rule Enforcement Details
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> Rule Enforcement Details / تفصیلات
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              {isBanned && "Your business subscription has been permanently deactivated or locked by system administration due to billing terms, policy non-compliance, or suspended tenant parameters."}
+              {isBanned && "Your business subscription has been blocked by Super Admin. All read/write privileges are locked until unlocked by administration."}
               {isSuspended && `Your account accessibility has been suspended temporarily. Access will automatically restore after the suspension period ends on: ${new Date(user.tempSuspendedUntil!).toLocaleDateString()}.`}
               {isTimeRestricted && `Security rules permit active terminal operations strictly between daily window: ${user.allowedHoursStart} and ${user.allowedHoursEnd}. Your device terminal is currently outside permitted hours.`}
             </p>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <a 
-              href="mailto:irfanksaeed@gmail.com?subject=OmniSuite%20ERP%20Support%20Appeal"
-              className="flex-1 py-3 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 font-extrabold text-xs text-white uppercase tracking-wider text-center rounded-xl transition shadow-lg shadow-rose-950/20"
+            <button
+              onClick={() => {
+                const refreshed = getTenants().find(t => t.id === user.id);
+                if (refreshed && refreshed.isActive !== false) {
+                  setActiveUser(refreshed);
+                  setUser(refreshed);
+                } else {
+                  alert("🚫 Account is still blocked by Super Admin.");
+                }
+              }}
+              className="flex-1 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 font-extrabold text-xs text-white uppercase tracking-wider text-center rounded-xl transition shadow-lg cursor-pointer"
             >
-              Contact Support (Irfan)
-            </a>
+              🔄 Re-check Status / اسٹیٹس چیک کریں
+            </button>
             <button
               onClick={handleSignOut}
               className="px-6 py-3 bg-slate-800 hover:bg-slate-750 font-bold text-xs text-slate-300 rounded-xl transition border border-white/5 uppercase tracking-wider cursor-pointer"
@@ -765,15 +1025,186 @@ export default function App() {
     );
   }
 
+  // 24-Hour Guest Pass Expiration Screen
+  if (user && isGuestPassExpired(user)) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-md w-full glass p-8 rounded-3xl border border-amber-500/30 text-center space-y-5 shadow-2xl relative overflow-hidden"
+        >
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto text-3xl border border-amber-500/30">
+            ⏱️
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-black text-white tracking-tight">
+              24-Hour Guest Pass Expired
+            </h2>
+            <p className="text-xs text-amber-300 font-medium">
+              آپ کا 24 گھنٹے کا وزٹ ٹرائل پاس ختم ہو چکا ہے
+            </p>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            This temporary 24-hour sandbox trial has concluded. To keep all your created invoices, items, and sales records and get permanent access, submit an upgrade request for Super Admin permission.
+          </p>
+
+          {user.guestUpgradeRequested ? (
+            <div className="bg-amber-950/60 border border-amber-500/40 p-4 rounded-2xl text-left space-y-2">
+              <div className="text-xs font-black text-amber-300 flex items-center gap-2">
+                <span className="animate-spin">⏳</span> Upgrade Request Pending Approval
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                آپ کی درخواست سپر ایڈمن (عرفان سعید) کو موصول ہو چکی ہے۔ جیسے ہی ایڈمن منظور کریں گے، آپ کا اکاؤنٹ فوراً مستقل ہو جائے گا۔
+              </p>
+              <button
+                onClick={() => {
+                  const refreshed = getTenants().find(t => t.id === user.id);
+                  if (refreshed && (!refreshed.isGuestPass || (refreshed.guestExpiresAt && new Date(refreshed.guestExpiresAt).getTime() > Date.now()))) {
+                    setActiveUser(refreshed);
+                    setUser(refreshed);
+                  } else {
+                    alert("⏳ Your request is still awaiting Super Admin approval.");
+                  }
+                }}
+                className="w-full mt-2 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition cursor-pointer"
+              >
+                🔄 Check Approval Status / اسٹیٹس چیک کریں
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2.5 pt-2">
+              <button
+                onClick={handleOpenGuestUpgradeModal}
+                className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider transition shadow-lg shadow-amber-950/40 cursor-pointer"
+              >
+                🌟 Request Permanent Access (مستقل رسائی کی اجازت لیں)
+              </button>
+              <button
+                onClick={() => {
+                  setActiveUser(null);
+                  setUser(null);
+                  window.location.href = '/?mode=register';
+                }}
+                className="w-full py-3 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/30 font-bold rounded-xl text-xs uppercase tracking-wider transition cursor-pointer"
+              >
+                🚀 Register New Workspace (نیا مستقل اکاؤنٹ بنائیں)
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={() => {
+              setActiveUser(null);
+              setUser(null);
+              window.location.href = '/';
+            }}
+            className="w-full py-2.5 bg-slate-900 hover:bg-slate-850 text-slate-400 hover:text-white font-bold rounded-xl text-xs transition cursor-pointer border border-white/5"
+          >
+            ← Return to Login Screen (لاگ اِن اسکرین پر جائیں)
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Tenant Subscription / Access Validity Expiration Screen
+  if (user && !user.isGuestPass && isTenantAccessExpired(user)) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-md w-full glass p-8 rounded-3xl border border-rose-500/30 text-center space-y-5 shadow-2xl relative overflow-hidden"
+        >
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto text-3xl border border-rose-500/30">
+            ⏳
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-black text-white tracking-tight">
+              Access License Period Expired
+            </h2>
+            <p className="text-xs text-rose-300 font-medium font-mono">
+              آپ کے بزنس اکاؤنٹ کی رسائی کی مدت ختم ہو چکی ہے
+            </p>
+          </div>
+
+          <div className="bg-rose-950/40 border border-rose-900/50 p-4 rounded-2xl text-left space-y-2 text-xs">
+            <div className="flex justify-between items-center text-slate-300">
+              <span>🏢 Business:</span>
+              <strong className="text-white">{user.companyName}</strong>
+            </div>
+            <div className="flex justify-between items-center text-slate-300">
+              <span>📧 Account:</span>
+              <span className="font-mono text-slate-300">{user.email}</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-300">
+              <span>⏰ Expiry Date:</span>
+              <span className="font-mono text-rose-300 font-bold">{user.subscriptionExpiry || 'Expired'}</span>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-300 leading-relaxed">
+            Your workspace access permission period granted by Super Admin has concluded. All your business records, invoices, and customers are safely preserved.
+          </p>
+
+          <div className="bg-slate-900/80 border border-slate-800 p-3.5 rounded-xl text-[11px] text-slate-400 space-y-1">
+            <p className="font-bold text-indigo-300">📞 Contact Super Admin for Renewal / Extension:</p>
+            <p className="text-white font-mono font-bold">irfanksaeed@gmail.com</p>
+            <p className="text-[10px] text-slate-500">Irfan Saeed • Global Platform Administrator</p>
+          </div>
+
+          <div className="space-y-2 pt-1">
+            <button
+              onClick={async () => {
+                await pullServerSync();
+                const fresh = getTenants().find(t => t.id === user.id);
+                if (fresh && !isTenantAccessExpired(fresh)) {
+                  setActiveUser(fresh);
+                  setUser(fresh);
+                } else {
+                  alert("⏳ Access license is still marked as expired. Please confirm with Super Admin Irfan Saeed.");
+                }
+              }}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40"
+            >
+              <RefreshCw className="w-4 h-4" />
+              🔄 Refresh & Check License Status / اسٹیٹس چیک کریں
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveUser(null);
+                setUser(null);
+                window.location.href = '/';
+              }}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-850 text-slate-400 hover:text-white font-bold rounded-xl text-xs transition cursor-pointer border border-white/5"
+            >
+              ← Return to Login Screen (لاگ اِن اسکرین پر جائیں)
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   const t = translations[lang];
   const isRtl = lang === 'ar' || lang === 'ur';
+  const activeUser: UserTenant = { ...user, language: lang };
 
   // Toggle layout direction inside HTML body
   document.documentElement.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
   document.documentElement.className = isRtl ? 'rtl-layout' : '';
 
-  // Master menu items specification
-  const isAdmin = user.role === 'admin' || user.email === 'admin@business.com' || user.email === 'irfanksaeed@gmail.com';
+  // Master menu items specification - only Super Admin / Admin role has access to global platform admin panel
+  const isSuperAdmin = user.email.toLowerCase() === 'irfanksaeed@gmail.com' || user.email.toLowerCase() === 'admin@business.com' || user.role === 'admin';
+  const isAdmin = isSuperAdmin;
+
+  // Calculate total pending registrations awaiting Super Admin decision
+  const pendingApprovalsCount = isAdmin
+    ? getTenants().filter(t => t.isApproved === false && t.email.toLowerCase() !== 'irfanksaeed@gmail.com').length +
+      getCustomersGlobal().filter(c => c.isApproved === false).length
+    : 0;
 
   const menuItems = [
     { id: 'dashboard', label: t.dashboard, icon: LayoutDashboard },
@@ -783,9 +1214,13 @@ export default function App() {
     { id: 'products', label: t.products, icon: Package },
     { id: 'invoices', label: t.invoices, icon: FileText },
     { id: 'inventory', label: t.inventory, icon: Layers },
-    { id: 'purchases', label: 'Purchase Records', icon: ShoppingCart },
+    { id: 'purchases', label: t.purchases || 'Purchases', icon: ShoppingCart },
     { id: 'reports', label: t.reports, icon: BarChart2 },
-    ...(isAdmin ? [{ id: 'admin', label: 'Admin Panel', icon: Shield }] : []),
+    ...(isAdmin ? [{ 
+      id: 'admin', 
+      label: pendingApprovalsCount > 0 ? `${t.adminPanel || 'Admin'} (${pendingApprovalsCount})` : (t.adminPanel || 'Admin Console'), 
+      icon: Shield 
+    }] : []),
     { id: 'settings', label: t.companySettings, icon: Settings },
   ];
 
@@ -809,6 +1244,68 @@ export default function App() {
         </div>
       )}
 
+      {/* 24-Hour Guest Visitor Pass Indicator Banner */}
+      {user.isGuestPass && !impersonatingFrom && (
+        <div className="bg-gradient-to-r from-amber-950 via-slate-900 to-indigo-950 border-b border-amber-500/30 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-[11px] font-bold select-text sticky top-0 z-50 shadow-lg">
+          <div className="flex items-center gap-2">
+            <span className="bg-amber-500 text-slate-950 text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider">
+              24-Hour Visit Pass
+            </span>
+            <span className="text-amber-200 text-xs">
+              ⏱️ Time Remaining: <span className="text-white font-mono font-black">{getGuestPassRemainingHours(user).hours}h {getGuestPassRemainingHours(user).minutes}m</span>
+            </span>
+            {user.guestUpgradeRequested ? (
+              <span className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 animate-pulse">
+                <span>⏳</span> Permanent Upgrade Request Pending Super Admin Approval (منظوری زیر التواء ہے)
+              </span>
+            ) : (
+              <span className="hidden sm:inline text-slate-400 text-[11px]">
+                • Evaluating live sandbox. Want to keep all data permanently?
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {user.guestUpgradeRequested ? (
+              <button
+                onClick={() => {
+                  const refreshed = getTenants().find(t => t.id === user.id);
+                  if (refreshed && !refreshed.isGuestPass) {
+                    setActiveUser(refreshed);
+                    setUser(refreshed);
+                    alert("🎉 Super Admin has approved your permanent workspace!");
+                  } else {
+                    alert("⏳ Your request is currently pending Super Admin approval.");
+                  }
+                }}
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-lg text-[10px] uppercase tracking-wider transition shadow-md cursor-pointer"
+              >
+                🔄 Check Approval Status
+              </button>
+            ) : (
+              <button
+                onClick={handleOpenGuestUpgradeModal}
+                className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-lg text-[10px] uppercase tracking-wider transition shadow-md cursor-pointer flex items-center gap-1.5"
+              >
+                <span>🌟</span> Request Permanent Access (مستقل اجازت لیں)
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                setActiveUser(null);
+                setUser(null);
+                window.location.href = '/?mode=register';
+              }}
+              className="px-2.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white font-bold rounded-lg text-[10px] uppercase tracking-wider transition cursor-pointer border border-white/5"
+              title="Create a brand new empty workspace"
+            >
+              🚀 New Workspace
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 1. Mobile top header bar */}
       <header className="lg:hidden bg-slate-900/95 border-b border-slate-850 px-4 py-3 flex items-center justify-between sticky top-0 z-40 backdrop-blur-md">
         <div className="flex items-center gap-2">
@@ -819,11 +1316,37 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-2">
+          {/* Super Admin Pending Approvals Notification Badge on Mobile Header */}
+          {isAdmin && pendingApprovalsCount > 0 && (
+            <button
+              onClick={() => setActiveModule('admin')}
+              className="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-[10px] font-black uppercase tracking-wider animate-bounce flex items-center gap-1 cursor-pointer shadow-lg"
+              title="View Pending Registration Approvals"
+            >
+              <span>⏳</span>
+              <span>{pendingApprovalsCount} Pending</span>
+            </button>
+          )}
+
           {/* Quick Stats Summary on Header */}
           <span className="hidden sm:inline-block text-[10px] text-indigo-300 font-mono px-2 py-0.5 bg-indigo-950/50 rounded border border-indigo-900/40">
             {stats.lowStockCount > 0 ? `🚩 Alerts: ${stats.lowStockCount}` : 'Healthy Stock'}
           </span>
           
+          {/* Mobile Language Switcher */}
+          <select
+            value={lang}
+            onChange={(e) => handleLanguageChange(e.target.value as Language)}
+            className="bg-slate-800 text-slate-200 border border-slate-700/80 rounded-lg px-1.5 py-1 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-sm"
+            title="Switch Language"
+          >
+            {APP_LANGUAGES.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.flag} {l.label}
+              </option>
+            ))}
+          </select>
+
           <button
             onClick={handleAppRefresh}
             disabled={isRefreshing}
@@ -895,10 +1418,45 @@ export default function App() {
                   >
                     <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-300' : 'text-slate-400'}`} />
                     <span className="flex-1 truncate">{item.label}</span>
+                    {item.id === 'admin' && pendingApprovalsCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[10px] animate-pulse">
+                        ⏳ {pendingApprovalsCount}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </nav>
+          </div>
+
+          {/* Quick 5-Language Switcher */}
+          <div className="px-4 py-2 border-t border-indigo-500/10">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                <Globe className="w-3 h-3 text-indigo-400" />
+                <span>
+                  {lang === 'ar' ? 'اللغة' : lang === 'ur' ? 'زبان منتخب کریں' : lang === 'bn' ? 'ভাষা নির্বাচন' : lang === 'hi' ? 'भाषा चुनें' : 'Language'}
+                </span>
+              </span>
+              <span className="text-[9px] font-mono font-bold text-indigo-300 uppercase">{lang}</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1 bg-slate-950/60 p-1 rounded-xl border border-white/5">
+              {APP_LANGUAGES.map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => handleLanguageChange(opt.id)}
+                  title={`${opt.flag} ${opt.label} (${opt.nativeName})`}
+                  className={`flex flex-col items-center justify-center py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    lang === opt.id
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <span className="text-sm leading-none">{opt.flag}</span>
+                  <span className="text-[8px] font-bold mt-0.5 uppercase tracking-tighter">{opt.id}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* User profile & Sign out */}
@@ -948,7 +1506,7 @@ export default function App() {
         )}
 
         {/* 3. Main Workspace content display area */}
-        <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+        <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto pb-24 lg:pb-8">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeModule}
@@ -986,54 +1544,54 @@ export default function App() {
                         type="button"
                       >
                         <span className="text-sm font-semibold">←</span>
-                        <span>Back to Dashboard</span>
+                        <span>{lang === 'ur' ? 'ڈیش بورڈ پر واپس جائیں' : lang === 'ar' ? 'العودة للوحة التحكم' : lang === 'bn' ? 'ড্যাশবোর্ডে ফিরে যান' : lang === 'hi' ? 'डैशबोर्ड पर वापस जाएं' : 'Back to Dashboard'}</span>
                       </button>
                     </div>
                   )}
                   {activeModule === 'dashboard' && (
-                    <Dashboard user={user} stats={stats} onNavigate={setActiveModule} />
+                    <Dashboard user={activeUser} stats={stats} onNavigate={setActiveModule} language={lang} />
                   )}
                   {activeModule === 'sales' && (
-                    <SalesModule user={user} onRefreshStats={handleRefreshStats} />
+                    <SalesModule user={activeUser} onRefreshStats={handleRefreshStats} />
                   )}
                   {activeModule === 'expenses' && (
-                    <ExpensesModule user={user} onRefreshStats={handleRefreshStats} />
+                    <ExpensesModule user={activeUser} onRefreshStats={handleRefreshStats} />
                   )}
                   {activeModule === 'customers' && (
-                    <CustomersModule user={user} onRefreshStats={handleRefreshStats} />
+                    <CustomersModule user={activeUser} onRefreshStats={handleRefreshStats} />
                   )}
                   {activeModule === 'products' && (
-                    <ProductsModule user={user} onRefreshStats={handleRefreshStats} />
+                    <ProductsModule user={activeUser} onRefreshStats={handleRefreshStats} />
                   )}
                   {activeModule === 'invoices' && (
-                    <InvoicesModule user={user} onRefreshStats={handleRefreshStats} />
+                    <InvoicesModule user={activeUser} onRefreshStats={handleRefreshStats} />
                   )}
                   {activeModule === 'inventory' && (
-                    <InventoryModule user={user} onRefreshStats={handleRefreshStats} onNavigate={setActiveModule} />
+                    <InventoryModule user={activeUser} onRefreshStats={handleRefreshStats} onNavigate={setActiveModule} />
                   )}
                   {activeModule === 'purchases' && (
-                    <PurchasesModule user={user} onRefreshStats={handleRefreshStats} />
+                    <PurchasesModule user={activeUser} onRefreshStats={handleRefreshStats} />
                   )}
                   {activeModule === 'reports' && (
-                    <ReportsModule user={user} />
+                    <ReportsModule user={activeUser} />
                   )}
                   {activeModule === 'admin' && isAdmin && (
                     <AdminModule 
-                      currentUser={user} 
+                      currentUser={activeUser} 
                       onRefreshStats={handleRefreshStats} 
                       onImpersonate={(tenant) => {
-                        localStorage.setItem('biz_suite_original_admin', JSON.stringify(user));
+                        localStorage.setItem('biz_suite_original_admin', JSON.stringify(activeUser));
                         setActiveUser(tenant);
                         setUser(tenant);
-                        setLang(tenant.language);
+                        handleLanguageChange(tenant.language);
                         setStats(getDashboardStats(tenant.id));
-                        setImpersonatingFrom(user);
+                        setImpersonatingFrom(activeUser);
                         setActiveModule('dashboard');
                       }}
                     />
                   )}
                   {activeModule === 'settings' && (
-                    <SettingsModule user={user} onUpdateUser={handleUpdateUser} />
+                    <SettingsModule user={activeUser} onUpdateUser={handleUpdateUser} />
                   )}
                 </>
               )}
@@ -1041,6 +1599,119 @@ export default function App() {
           </AnimatePresence>
         </main>
       </div>
+
+      {/* 4. Responsive Mobile Bottom Navigation Bar (Ultra-responsive 1-tap links for Mobile) */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-slate-900/95 backdrop-blur-lg border-t border-indigo-900/50 z-40 px-2 py-1.5 flex items-center justify-around shadow-2xl safe-area-bottom">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveModule('dashboard');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all cursor-pointer min-w-[50px] ${
+            activeModule === 'dashboard'
+              ? 'text-indigo-400 font-bold bg-indigo-950/70 border border-indigo-500/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <LayoutDashboard className="w-4 h-4 mb-0.5" />
+          <span className="text-[10px] tracking-tight">{t.dashboard}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveModule('sales');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all cursor-pointer min-w-[50px] ${
+            activeModule === 'sales'
+              ? 'text-indigo-400 font-bold bg-indigo-950/70 border border-indigo-500/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Receipt className="w-4 h-4 mb-0.5" />
+          <span className="text-[10px] tracking-tight">{t.sales}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveModule('inventory');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all cursor-pointer min-w-[50px] ${
+            activeModule === 'inventory'
+              ? 'text-indigo-400 font-bold bg-indigo-950/70 border border-indigo-500/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers className="w-4 h-4 mb-0.5" />
+          <span className="text-[10px] tracking-tight">{t.inventory}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveModule('invoices');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all cursor-pointer min-w-[50px] ${
+            activeModule === 'invoices'
+              ? 'text-indigo-400 font-bold bg-indigo-950/70 border border-indigo-500/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <FileText className="w-4 h-4 mb-0.5" />
+          <span className="text-[10px] tracking-tight">{t.invoices}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveModule('customers');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all cursor-pointer min-w-[50px] ${
+            activeModule === 'customers'
+              ? 'text-indigo-400 font-bold bg-indigo-950/70 border border-indigo-500/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Users className="w-4 h-4 mb-0.5" />
+          <span className="text-[10px] tracking-tight">{t.customers}</span>
+        </button>
+
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveModule('admin');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all cursor-pointer min-w-[50px] relative ${
+              activeModule === 'admin'
+                ? 'text-amber-400 font-bold bg-amber-950/70 border border-amber-500/40'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Shield className="w-4 h-4 mb-0.5" />
+            <span className="text-[10px] tracking-tight">{t.adminPanel || 'Admin'}</span>
+            {pendingApprovalsCount > 0 && (
+              <span className="absolute -top-1 right-1 w-2.5 h-2.5 rounded-full bg-amber-500 animate-bounce" />
+            )}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            className="flex flex-col items-center justify-center py-1 px-2 rounded-xl text-slate-400 hover:text-white transition-all cursor-pointer min-w-[50px]"
+          >
+            <Menu className="w-4 h-4 mb-0.5" />
+            <span className="text-[10px] tracking-tight">More</span>
+          </button>
+        )}
+      </nav>
 
       {/* 4. Live Floating Chat Widget (Disabled inside Super Admin's own terminal interface to avoid layout conflict) */}
       {user.email !== 'irfanksaeed@gmail.com' && (
@@ -1163,6 +1834,146 @@ export default function App() {
         </div>
       )}
 
+      {/* 24-Hour Guest Upgrade Request Modal */}
+      {showGuestUpgradeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="w-full max-w-lg bg-slate-900 border border-amber-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 relative overflow-hidden max-h-[90vh] overflow-y-auto"
+          >
+            {/* Top golden accent line */}
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-amber-500 via-indigo-500 to-amber-500" />
+
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-2xl border border-amber-500/30 shrink-0">
+                  🌟
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white tracking-tight">
+                    Request Permanent Access Permission
+                  </h3>
+                  <p className="text-xs text-amber-300 font-medium">
+                    سپر ایڈمن (عرفان سعید) سے مستقل اکاؤنٹ کی منظوری حاصل کریں
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowGuestUpgradeModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/60 p-3.5 rounded-2xl border border-white/5">
+              💡 <strong>تمام ڈیٹا محفوظ رہے گا:</strong> مستقل رسائی کی منظوری کے بعد آپ کی ٹرائل کے دوران بنائی گئی تمام انوائسز، پراڈکٹس، سیلز اور کسٹمرز مستقل اکاؤنٹ میں منتقل ہو جائیں گی۔
+            </p>
+
+            {upgradeMsg && (
+              <div
+                className={`p-3.5 rounded-xl text-xs font-medium ${
+                  upgradeMsg.type === 'success'
+                    ? 'bg-emerald-950/70 border border-emerald-500/40 text-emerald-300'
+                    : 'bg-rose-950/70 border border-rose-500/40 text-rose-300'
+                }`}
+              >
+                {upgradeMsg.text}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitGuestUpgrade} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                  Business / Company Name (کاروبار یا دکان کا نام) *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={upgradeCompanyName}
+                  onChange={(e) => setUpgradeCompanyName(e.target.value)}
+                  placeholder="e.g. Al-Madina Traders / Saeed Electronics"
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition shadow-inner font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Permanent Login Email (ای میل) *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={upgradeEmail}
+                    onChange={(e) => setUpgradeEmail(e.target.value)}
+                    placeholder="your-email@company.com"
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition shadow-inner font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    WhatsApp / Phone (فون یا واٹس ایپ)
+                  </label>
+                  <input
+                    type="text"
+                    value={upgradePhone}
+                    onChange={(e) => setUpgradePhone(e.target.value)}
+                    placeholder="+92 300 1234567"
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition shadow-inner font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                  Custom Password (نیا پاس ورڈ سیٹ کریں)
+                </label>
+                <input
+                  type="password"
+                  value={upgradePassword}
+                  onChange={(e) => setUpgradePassword(e.target.value)}
+                  placeholder="Set your account password (optional)"
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition shadow-inner font-medium"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                  Message / Notes for Super Admin (عرفان سعید کے نام پیغام)
+                </label>
+                <textarea
+                  rows={2}
+                  value={upgradeNotes}
+                  onChange={(e) => setUpgradeNotes(e.target.value)}
+                  placeholder="Explain your business type or requested subscription duration..."
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition shadow-inner font-medium"
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <button
+                  type="submit"
+                  disabled={upgradeSubmitting}
+                  className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider transition shadow-lg shadow-amber-950/40 cursor-pointer disabled:opacity-50"
+                >
+                  {upgradeSubmitting ? 'Submitting Request...' : '🚀 Submit Request to Super Admin (درخواست بھیجیں)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowGuestUpgradeModal(false)}
+                  className="px-5 py-3 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider transition cursor-pointer border border-white/5"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
       {/* 5. Embedded Grounded AI Assistant Agent */}
       <AIAgentWidget user={user} />
 
@@ -1183,12 +1994,13 @@ export default function App() {
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
-            width: 100% !important;
-            padding: 0 !important;
-            margin: 0 !important;
+            margin: 0 auto !important;
             background: white !important;
             color: black !important;
             box-shadow: none !important;
+            box-sizing: border-box !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
         }
       `}</style>

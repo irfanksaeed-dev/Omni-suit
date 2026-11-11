@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { UserTenant } from '../types';
 import { getInvoices, getCustomers } from '../db';
 import { currencySymbols } from '../translations';
+import { getBaseAppUrl, openExternalLink, buildWhatsAppLink } from '../utils/links';
 
 interface AIAgentWidgetProps {
   user: UserTenant;
@@ -159,7 +160,7 @@ export default function AIAgentWidget({ user }: AIAgentWidgetProps) {
       const invoicesStr = item.invoices.map(inv => inv.invoiceNumber).join(', ');
       
       // Portal link for directly viewing statement / settling online
-      const magicClientLink = `${window.location.origin}/?customerEmail=${encodeURIComponent(item.customer.email)}`;
+      const magicClientLink = `${getBaseAppUrl()}/?customerEmail=${encodeURIComponent(item.customer.email)}`;
       
       const template = `Hello *${item.customer.name}*!\n\nThis is a friendly sales account reminder from *${user.companyName}* regarding your outstanding dues.\n\n*Total Balance:* ${totalVal}\n*Pending Invoices:* ${invoicesStr}\n\nYou can click on the secure direct statement link below to view details and pay online inside your portal:\n${magicClientLink}\n\nThank you for your valued business!\n*${user.companyName}*`;
       
@@ -171,7 +172,7 @@ export default function AIAgentWidget({ user }: AIAgentWidgetProps) {
   const handleLaunchWhatsApp = (phone: string, text: string) => {
     const cleanPhone = phone.replace(/\D/g, '');
     const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
-    window.open(waUrl, '_blank');
+    openExternalLink(waUrl, '_blank');
   };
 
   // Multilingual configurations
